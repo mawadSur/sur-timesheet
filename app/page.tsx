@@ -127,6 +127,11 @@ export default function Home() {
     setDate(todayISO());
   }
 
+  async function logout() {
+    await fetch("/api/logout", { method: "POST" }).catch(() => {});
+    window.location.href = "/login";
+  }
+
   return (
     <>
       <header className="topbar">
@@ -292,6 +297,10 @@ export default function Home() {
         </div>
         <p className="foot">
           {BRAND.name} Timesheet · your hours are saved to the company record
+          {"  ·  "}
+          <button type="button" className="logout" onClick={logout}>
+            Log out
+          </button>
         </p>
       </main>
     </>
