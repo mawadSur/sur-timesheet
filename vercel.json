@@ -1,0 +1,3 @@
+{
+  "crons": [{ "path": "/api/cron/discord-status", "schedule": "0 9 * * *" }]
+}

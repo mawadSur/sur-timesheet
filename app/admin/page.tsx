@@ -49,6 +49,9 @@ export default async function Admin() {
             <small>Admin</small>
           </div>
           <nav className="topnav">
+            <Link className="navlink" href="/admin/dashboard">
+              Dashboard
+            </Link>
             <Link className="navlink" href="/">
               Timesheet
             </Link>
@@ -188,7 +191,9 @@ export default async function Admin() {
             <tbody>
               {(projects ?? []).flatMap((p) => [
                 <tr key={p.id}>
-                  <td>{p.name}</td>
+                  <td>
+                    <Link href={`/admin/projects/${p.id}`}>{p.name}</Link>
+                  </td>
                   <td className="muted-cell">
                     {p.starts_on || "—"} → {p.ends_on || "—"}
                   </td>

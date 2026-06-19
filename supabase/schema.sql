@@ -256,3 +256,44 @@ create policy audit_select_admin on public.audit_log
 drop policy if exists audit_insert on public.audit_log;
 create policy audit_insert on public.audit_log
   for insert to authenticated with check (auth.uid() is not null);
+
+-- ============================================================================
+--  PHASE 3 — admin project dashboard: project metadata, time off, Discord status
+--  Idempotent.
+-- ============================================================================
+
+-- Project metadata for the admin dashboard.
+alter table public.projects add column if not exists status text not null default 'Active';
+alter table public.projects add column if not exists pay_type text;           -- 'C2C' | 'W2' | '1099'
+alter table public.projects add column if not exists manager_name text;
+alter table public.projects add column if not exists it_support_phone text;
+alter table public.projects add column if not exists recruiter_email text;
+alter table public.projects add column if not exists discord_channel_id text;
+alter table public.projects add column if not exists discord_status_summary text;
+alter table public.projects add column if not exists discord_status_raw text;
+alter table public.projects add column if not exists discord_status_updated_at timestamptz;
+
+-- Planned days off, scoped to a project (optionally attributed to a person).
+create table if not exists public.time_off (
+  id          uuid primary key default gen_random_uuid(),
+  project_id  uuid not null references public.projects(id) on delete cascade,
+  user_id     uuid references public.profiles(id) on delete set null,
+  person_name text,
+  start_date  date not null,
+  end_date    date not null,
+  note        text,
+  created_at  timestamptz not null default now()
+);
+
+alter table public.time_off enable row level security;
+drop policy if exists time_off_select on public.time_off;
+create policy time_off_select on public.time_off
+  for select to authenticated using (
+    public.is_admin() or exists (
+      select 1 from public.assignments a
+      where a.project_id = time_off.project_id and a.user_id = auth.uid()
+    )
+  );
+drop policy if exists time_off_write_admin on public.time_off;
+create policy time_off_write_admin on public.time_off
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
