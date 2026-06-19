@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PREFIXES = ["/login", "/auth", "/not-authorized"];
+// Cron endpoints authenticate themselves with CRON_SECRET, so they're exempt
+// from the user-session gate (Vercel Cron calls them with no Supabase session).
+const PUBLIC_PREFIXES = ["/login", "/auth", "/not-authorized", "/api/cron"];
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
