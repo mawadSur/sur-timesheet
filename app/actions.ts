@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { logAudit } from "@/lib/audit";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export async function signOut() {
@@ -84,6 +85,7 @@ export async function addAllowedEmail(formData: FormData) {
   await supabase
     .from("allowed_emails")
     .upsert({ email, role: role === "admin" ? "admin" : "employee" });
+  await logAudit("add_allowed_email", { target: email });
   revalidatePath("/admin");
 }
 
@@ -92,6 +94,7 @@ export async function removeAllowedEmail(formData: FormData) {
   const email = String(formData.get("email") || "").trim().toLowerCase();
   if (!email) return;
   await supabase.from("allowed_emails").delete().eq("email", email);
+  await logAudit("remove_allowed_email", { target: email });
   revalidatePath("/admin");
 }
 
@@ -102,6 +105,7 @@ export async function setRole(formData: FormData) {
   if (!email) return;
   await supabase.from("allowed_emails").update({ role }).eq("email", email);
   await supabase.from("profiles").update({ role }).eq("email", email);
+  await logAudit("set_role", { target: email, metadata: { role } });
   revalidatePath("/admin");
 }
 
@@ -117,6 +121,7 @@ export async function createProject(formData: FormData) {
     ends_on: String(formData.get("ends_on") || "") || null,
     vm_host: String(formData.get("vm_host") || "").trim() || null,
   });
+  await logAudit("create_project", { target: name });
   revalidatePath("/admin");
 }
 
@@ -125,6 +130,7 @@ export async function deleteProject(formData: FormData) {
   const id = String(formData.get("id") || "");
   if (!id) return;
   await supabase.from("projects").delete().eq("id", id);
+  await logAudit("delete_project", { target: id });
   revalidatePath("/admin");
 }
 
@@ -137,6 +143,7 @@ export async function assignProject(formData: FormData) {
   await supabase
     .from("assignments")
     .upsert({ user_id, project_id }, { onConflict: "user_id,project_id" });
+  await logAudit("assign", { metadata: { user_id, project_id } });
   revalidatePath("/admin");
 }
 
@@ -145,5 +152,6 @@ export async function unassignProject(formData: FormData) {
   const id = String(formData.get("id") || "");
   if (!id) return;
   await supabase.from("assignments").delete().eq("id", id);
+  await logAudit("unassign", { target: id });
   revalidatePath("/admin");
 }

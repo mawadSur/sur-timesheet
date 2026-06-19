@@ -48,15 +48,30 @@ export async function updateSession(request: NextRequest) {
     return redirect;
   }
 
-  // Admin area → must have the admin role.
-  if (user && (path === "/admin" || path.startsWith("/admin/"))) {
+  // Signed-in user on a non-public route → fetch role + active status once.
+  if (user && !isPublic) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("role")
+      .select("role, is_active")
       .eq("id", user.id)
       .single();
 
-    if (profile?.role !== "admin") {
+    // Revoked → lock out immediately on every request.
+    if (profile?.is_active === false) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/not-authorized";
+      const redirect = NextResponse.redirect(url);
+      supabaseResponse.cookies.getAll().forEach((c) =>
+        redirect.cookies.set(c.name, c.value)
+      );
+      return redirect;
+    }
+
+    // Admin area → must have the admin role.
+    if (
+      (path === "/admin" || path.startsWith("/admin/")) &&
+      profile?.role !== "admin"
+    ) {
       const url = request.nextUrl.clone();
       url.pathname = "/";
       const redirect = NextResponse.redirect(url);

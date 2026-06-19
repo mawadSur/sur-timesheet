@@ -4,6 +4,7 @@ import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/actions";
 import TimesheetForm, { type ProjectOption } from "@/components/TimesheetForm";
+import CredentialsPanel from "@/components/CredentialsPanel";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -53,6 +54,9 @@ export default async function Home() {
 
       <main className="page">
         <p className="greeting">Hi {firstName} — log your hours below.</p>
+        {((projects as ProjectOption[]) ?? []).map((p) => (
+          <CredentialsPanel key={p.id} projectId={p.id} projectName={p.name} />
+        ))}
         <TimesheetForm projects={(projects as ProjectOption[]) ?? []} />
         <p className="foot">{BRAND.name} Portal · {profile?.email}</p>
       </main>

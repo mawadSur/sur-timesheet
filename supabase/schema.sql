@@ -165,3 +165,94 @@ create policy timesheets_modify on public.timesheets
 insert into public.allowed_emails (email, role)
 values ('mawad10101@gmail.com', 'admin')
 on conflict (email) do update set role = 'admin';
+
+-- ============================================================================
+--  PHASE 2 — credentials vault, audit log, access revocation
+--  Idempotent; safe to run on top of the Phase 1 schema above.
+-- ============================================================================
+
+-- ── Access revocation flags ──────────────────────────────────────────────────
+alter table public.profiles       add column if not exists is_active boolean not null default true;
+alter table public.allowed_emails add column if not exists is_active boolean not null default true;
+
+-- Re-create the signup trigger so it also blocks revoked accounts.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  allowed_role text;
+  allowed_active boolean;
+begin
+  select role, is_active into allowed_role, allowed_active
+  from public.allowed_emails
+  where lower(email) = lower(new.email);
+
+  if allowed_role is null then
+    raise exception 'Email % is not authorized for the Sur Portal', new.email;
+  end if;
+  if allowed_active is false then
+    raise exception 'Access for % has been revoked', new.email;
+  end if;
+
+  insert into public.profiles (id, email, full_name, role)
+  values (
+    new.id,
+    new.email,
+    coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name'),
+    allowed_role
+  );
+  return new;
+end;
+$$;
+
+-- ── Credentials vault ──────────────────────────────────────────────────────────
+-- secret_encrypted holds AES-256-GCM ciphertext produced by the app (lib/crypto.ts).
+-- The DB never sees plaintext secrets.
+create table if not exists public.credentials (
+  id               uuid primary key default gen_random_uuid(),
+  project_id       uuid not null references public.projects(id) on delete cascade,
+  label            text not null,
+  username         text,
+  secret_encrypted text not null,
+  url              text,
+  notes            text,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+
+alter table public.credentials enable row level security;
+-- Assigned users may read their projects' credential rows (ciphertext only;
+-- decryption happens server-side). Admin manages everything.
+drop policy if exists credentials_select on public.credentials;
+create policy credentials_select on public.credentials
+  for select to authenticated using (
+    public.is_admin() or exists (
+      select 1 from public.assignments a
+      where a.project_id = credentials.project_id and a.user_id = auth.uid()
+    )
+  );
+drop policy if exists credentials_write_admin on public.credentials;
+create policy credentials_write_admin on public.credentials
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- ── Audit log ────────────────────────────────────────────────────────────────
+create table if not exists public.audit_log (
+  id          uuid primary key default gen_random_uuid(),
+  actor_id    uuid references public.profiles(id) on delete set null,
+  actor_email text,
+  action      text not null,
+  target      text,
+  metadata    jsonb,
+  created_at  timestamptz not null default now()
+);
+
+alter table public.audit_log enable row level security;
+drop policy if exists audit_select_admin on public.audit_log;
+create policy audit_select_admin on public.audit_log
+  for select to authenticated using (public.is_admin());
+drop policy if exists audit_insert on public.audit_log;
+create policy audit_insert on public.audit_log
+  for insert to authenticated with check (auth.uid() is not null);

@@ -11,6 +11,8 @@ import {
   unassignProject,
   signOut,
 } from "@/app/actions";
+import AdminCredentials from "@/components/AdminCredentials";
+import UserAccessControls from "@/components/UserAccessControls";
 
 type Named = { full_name: string | null; email: string } | null;
 
@@ -19,7 +21,7 @@ export default async function Admin() {
 
   const [{ data: allowed }, { data: profiles }, { data: projects }, { data: assignments }, { data: timesheets }] =
     await Promise.all([
-      supabase.from("allowed_emails").select("email, role").order("email"),
+      supabase.from("allowed_emails").select("email, role, is_active").order("email"),
       supabase.from("profiles").select("id, full_name, email, role").order("email"),
       supabase.from("projects").select("id, name, starts_on, ends_on, vm_host").order("name"),
       supabase
@@ -49,6 +51,9 @@ export default async function Admin() {
           <nav className="topnav">
             <Link className="navlink" href="/">
               Timesheet
+            </Link>
+            <Link className="navlink" href="/admin/audit">
+              Audit
             </Link>
             <a className="navlink" href="/admin/export">
               Export CSV
@@ -115,12 +120,15 @@ export default async function Admin() {
                     )}
                   </td>
                   <td className="right">
-                    <form action={removeAllowedEmail}>
-                      <input type="hidden" name="email" value={a.email} />
-                      <button type="submit" className="link-btn">
-                        Remove
-                      </button>
-                    </form>
+                    <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", alignItems: "center" }}>
+                      <UserAccessControls email={a.email} isActive={a.is_active} />
+                      <form action={removeAllowedEmail}>
+                        <input type="hidden" name="email" value={a.email} />
+                        <button type="submit" className="link-btn">
+                          Remove
+                        </button>
+                      </form>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -178,7 +186,7 @@ export default async function Admin() {
               </tr>
             </thead>
             <tbody>
-              {(projects ?? []).map((p) => (
+              {(projects ?? []).flatMap((p) => [
                 <tr key={p.id}>
                   <td>{p.name}</td>
                   <td className="muted-cell">
@@ -193,8 +201,13 @@ export default async function Admin() {
                       </button>
                     </form>
                   </td>
-                </tr>
-              ))}
+                </tr>,
+                <tr key={p.id + "-creds"}>
+                  <td colSpan={4} style={{ background: "#fcfdff" }}>
+                    <AdminCredentials projectId={p.id} projectName={p.name} />
+                  </td>
+                </tr>,
+              ])}
               {(projects ?? []).length === 0 && (
                 <tr>
                   <td colSpan={4} className="muted-cell">
