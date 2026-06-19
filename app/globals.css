@@ -162,6 +162,30 @@ select:disabled {
   font-size: 12.5px;
   color: var(--muted);
 }
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.quick-fill {
+  background: var(--blue-50);
+  color: var(--blue-dark);
+  border: 1px solid var(--blue-100);
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.quick-fill:hover:not(:disabled) {
+  background: var(--blue-100);
+  border-color: var(--blue);
+}
+.quick-fill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 /* ── Project rows ────────────────────────────────────────── */
 .entry {

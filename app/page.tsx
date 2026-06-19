@@ -67,6 +67,10 @@ export default function Home() {
     setEntries((prev) => prev.filter((_, idx) => idx !== i));
   }
 
+  function fillEightAll() {
+    setEntries((prev) => prev.map((e) => ({ ...e, hours: "8" })));
+  }
+
   async function submit() {
     setError("");
 
@@ -207,7 +211,18 @@ export default function Home() {
 
               <div className="section-head">
                 <h2>Projects &amp; hours</h2>
-                <span>{entries.length} added</span>
+                <div className="section-actions">
+                  <button
+                    type="button"
+                    className="quick-fill"
+                    onClick={fillEightAll}
+                    disabled={!employee}
+                    title="Set every project row to 8 hours"
+                  >
+                    Set all to 8h
+                  </button>
+                  <span>{entries.length} added</span>
+                </div>
               </div>
 
               {entries.map((entry, i) => (
