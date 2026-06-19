@@ -45,11 +45,35 @@ body {
   padding: 22px 20px;
 }
 .topbar-inner {
-  max-width: 720px;
+  max-width: 900px;
   margin: 0 auto;
   display: flex;
   align-items: center;
   gap: 14px;
+}
+.topnav {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.navlink {
+  color: #fff;
+  text-decoration: none;
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  transition: background 0.15s;
+}
+.navlink:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.navbtn {
+  cursor: pointer;
+  font-family: inherit;
 }
 .logo {
   width: 44px;
@@ -410,6 +434,178 @@ select:disabled {
 .auth-card .field {
   text-align: left;
   margin-bottom: 16px;
+}
+.google-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.google-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+.google-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.auth-note {
+  color: var(--muted);
+  font-size: 12.5px;
+  margin: 16px 0 0;
+}
+
+/* ── Greeting / empty states ─────────────────────────────── */
+.greeting {
+  font-size: 15px;
+  color: var(--ink-soft);
+  margin: 0 0 16px;
+  font-weight: 500;
+}
+.empty {
+  text-align: center;
+  padding: 18px 6px;
+}
+.empty h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.empty p {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0;
+}
+
+/* ── Admin ───────────────────────────────────────────────── */
+.page.admin {
+  max-width: 900px;
+}
+.admin .card {
+  margin-bottom: 20px;
+}
+.card-title {
+  font-size: 17px;
+  margin: 0 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.count-pill {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--blue-dark);
+  background: var(--blue-50);
+  border: 1px solid var(--blue-100);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.inline-form {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0 18px;
+}
+.inline-form input,
+.inline-form select {
+  width: auto;
+  flex: 1 1 180px;
+}
+.stack-form {
+  margin: 14px 0 18px;
+}
+.row-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.row-form select {
+  width: auto;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.btn {
+  background: var(--blue);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 11px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover {
+  background: var(--blue-dark);
+}
+.btn-sm {
+  background: var(--blue-50);
+  color: var(--blue-dark);
+  border: 1px solid var(--blue-100);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.btn-sm:hover {
+  background: var(--blue-100);
+}
+
+/* ── Tables ──────────────────────────────────────────────── */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.tbl th {
+  text-align: left;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.tbl td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: middle;
+}
+.tbl tr:last-child td {
+  border-bottom: none;
+}
+.tbl .right {
+  text-align: right;
+}
+.muted-cell {
+  color: var(--muted);
+}
+.badge {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.badge-ok {
+  background: var(--green-bg);
+  color: var(--green);
+  border-color: #bbf7d0;
 }
 
 /* ── Logout link ─────────────────────────────────────────── */

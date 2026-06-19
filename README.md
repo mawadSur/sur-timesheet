@@ -1,73 +1,73 @@
-# Sur Timesheet
+# Sur Portal
 
-A simple, shareable timesheet for the Sur team. Share one link with your
-employees — they pick their name, choose a date, and log hours across the
-projects they worked on. Every submission is appended to a Google Sheet you own.
+An internal team portal for Sur. Employees **sign in with Google**, an admin
+**assigns them to projects**, and everyone logs hours against their assigned
+projects. Built on Next.js + Supabase, deployed on Vercel.
 
-- **No passwords** — one shared link, employees pick their name.
-- **Multiple projects** — each person logs hours across several projects at once.
-- **Google Sheet storage** — one row per project: `Submitted At · Employee · Date · Project · Hours · Notes`.
-- **Sur branding** — clean professional blue.
-
----
-
-## Connect your Google Sheet (one-time, ~4 steps)
-
-The app sends each submission to a tiny Google Apps Script attached to your
-sheet. No API keys or service accounts needed.
-
-1. **Create the sheet.** Go to [sheets.new](https://sheets.new) and name it
-   e.g. _"Sur Timesheet"_.
-
-2. **Add the script.** In that sheet: **Extensions ▸ Apps Script**. Delete any
-   sample code, then paste the contents of
-   [`google-apps-script/Code.gs`](./google-apps-script/Code.gs). Click the save
-   icon.
-
-3. **Deploy as a Web App.** Click **Deploy ▸ New deployment** → gear icon →
-   **Web app**. Set:
-   - **Execute as:** _Me_
-   - **Who has access:** _Anyone_
-
-   Click **Deploy**, authorize when prompted, and **copy the Web app URL**
-   (looks like `https://script.google.com/macros/s/AKfy…/exec`).
-
-4. **Give the URL to the app.** Add it as an environment variable on Vercel:
-
-   ```bash
-   vercel env add SHEETS_WEBHOOK_URL production
-   # paste the Web app URL when prompted, then redeploy:
-   vercel --prod
-   ```
-
-   (Or add it in the Vercel dashboard → Project → Settings → Environment
-   Variables, then redeploy.)
-
-That's it — submissions now land in your sheet.
-
-### Optional: shared secret
-
-To stop anyone who finds the URL from posting to your sheet:
-
-- Set `SHARED_SECRET` in `Code.gs` to any string and re-deploy the script.
-- Add the **same** string to Vercel as `SHEETS_SHARED_SECRET`, then redeploy.
+> **Phase 1 (this release):** Google login · email allowlist · admin panel to
+> manage people, projects & assignments · timesheets in the database · CSV export.
+>
+> **Roadmap:** per-project encrypted VM/PiKVM credentials vault → Tailscale
+> auto-provisioning (invite + ACLs) → Discord channel access → project durations
+> & continuous feedback.
 
 ---
 
-## Manage your team & projects
+## One-time setup (~15 min)
 
-Edit [`config/timesheet.ts`](./config/timesheet.ts):
+You need a free [Supabase](https://supabase.com) project and a Google OAuth
+client. Both use **your** accounts, so these steps are yours to run.
 
-- `BRAND` — name and tagline.
-- `PROJECTS` — every project your company runs.
-- `EMPLOYEES` — each person, and optionally the subset of projects they can log
-  against (omit `projects` to allow all).
+### 1. Create the Supabase project
+- New project at [supabase.com](https://supabase.com) → wait for it to provision.
+- **Project Settings → API**, copy:
+  - **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
+  - **anon public** key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
-Then commit and push — Vercel redeploys automatically:
+### 2. Create the database
+- **SQL Editor → New query**, paste all of [`supabase/schema.sql`](./supabase/schema.sql), and run it.
+- It creates the tables, security rules, the sign-in allowlist trigger, and
+  seeds **you** (`mawad10101@gmail.com`) as the first admin. Change that line
+  first if you want a different admin.
 
+### 3. Turn on Google login
+- In Supabase: **Authentication → Providers → Google → enable**.
+- Create a Google OAuth client at
+  [console.cloud.google.com](https://console.cloud.google.com) → APIs & Services
+  → Credentials → **OAuth client ID** (type: Web application).
+  - **Authorized redirect URI:** the callback URL shown on the Supabase Google
+    provider page (looks like `https://YOUR-PROJECT.supabase.co/auth/v1/callback`).
+  - Paste the resulting **Client ID** and **Client secret** into Supabase, save.
+- In Supabase **Authentication → URL Configuration**:
+  - **Site URL:** `https://sur-timesheet.vercel.app`
+  - **Redirect URLs:** add `https://sur-timesheet.vercel.app/**` and
+    `http://localhost:3000/**`.
+
+### 4. Give the app the keys (Vercel)
 ```bash
-git add -A && git commit -m "Update team and projects" && git push
+vercel env add NEXT_PUBLIC_SUPABASE_URL        # paste Project URL
+vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY   # paste anon key
+vercel --prod                                  # redeploy
 ```
+(Add to all environments when prompted so previews work too.)
+
+That's it — sign in with Google at the site, and you'll land in `/admin`.
+
+---
+
+## Running it day to day (admin panel)
+
+Everything is managed in-app at **`/admin`** (admins only):
+
+- **People & access** — add an email *before* someone signs in (Google login is
+  invite-only). Set anyone to Employee or Admin.
+- **Projects** — create projects with optional dates and the Tailscale VM/PiKVM
+  link.
+- **Assignments** — assign people to projects. A person only sees (and can log
+  hours against) the projects they're assigned to.
+- **Logged hours** — review everyone's entries; **Export CSV** for payroll.
+
+No code changes or redeploys needed for any of this.
 
 ---
 
@@ -75,19 +75,24 @@ git add -A && git commit -m "Update team and projects" && git push
 
 ```bash
 npm install
+# put your Supabase URL + anon key in .env.local
 npm run dev      # http://localhost:3000
-```
-
-To test saving locally, create a `.env.local` file:
-
-```
-SHEETS_WEBHOOK_URL=https://script.google.com/macros/s/AKfy…/exec
 ```
 
 ---
 
-## Tech
+## How it fits together
 
-Next.js (App Router) · TypeScript · deployed on Vercel. Submissions are proxied
-through a serverless route (`app/api/submit/route.ts`) that validates the
-employee, date, and project before forwarding to your Google Sheet.
+```
+Employee (Google login)
+      │
+      ▼
+Next.js on Vercel ──── Supabase Postgres
+      ├── @supabase/ssr   (session in cookies, refreshed by middleware)
+      ├── allowlist trigger (only invited emails can create an account)
+      └── Row Level Security (employees see only their own data & projects)
+```
+
+Key files: `supabase/schema.sql` (data model + security), `middleware.ts` +
+`lib/supabase/*` (auth/session), `app/admin/*` (admin panel), `app/actions.ts`
+(all mutations), `components/TimesheetForm.tsx` (the employee form).
