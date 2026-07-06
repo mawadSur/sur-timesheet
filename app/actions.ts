@@ -109,6 +109,18 @@ export async function setRole(formData: FormData) {
   revalidatePath("/admin");
 }
 
+// Set/correct a person's display name (e.g. to tell apart two accounts whose
+// Google display name is identical). RLS `profiles_update_admin` is the backstop.
+export async function setProfileName(formData: FormData) {
+  const supabase = await requireAdmin();
+  const id = String(formData.get("id") || "");
+  const full_name = String(formData.get("full_name") || "").trim().slice(0, 120);
+  if (!id) return;
+  await supabase.from("profiles").update({ full_name: full_name || null }).eq("id", id);
+  await logAudit("set_profile_name", { target: id, metadata: { full_name: full_name || null } });
+  revalidatePath("/admin");
+}
+
 // ── Admin: projects ──────────────────────────────────────────────────────────────
 export async function createProject(formData: FormData) {
   const supabase = await requireAdmin();
@@ -154,4 +166,39 @@ export async function unassignProject(formData: FormData) {
   await supabase.from("assignments").delete().eq("id", id);
   await logAudit("unassign", { target: id });
   revalidatePath("/admin");
+}
+
+// ── Admin: per-assignment billing rates (money is admin-only) ────────────────────
+// bill_rate = what the client pays/hour; pay_rate = what we pay the consultant/hour.
+// A blank field is an intentional clear (-> null). An invalid entry (negative /
+// NaN / absurd) is NOT written at all, so a fat-fingered value can't silently
+// wipe a previously-saved valid rate — the prior value is preserved on upsert.
+function parseRateField(v: FormDataEntryValue | null): { present: boolean; value: number | null } {
+  const s = String(v ?? "").trim();
+  if (s === "") return { present: true, value: null }; // intentional clear
+  const n = Number(s);
+  if (!Number.isFinite(n) || n < 0 || n > 100000) return { present: false, value: null }; // invalid -> omit
+  return { present: true, value: Math.round(n * 100) / 100 };
+}
+
+export async function setAssignmentRate(formData: FormData) {
+  const supabase = await requireAdmin();
+  const assignment_id = String(formData.get("assignment_id") || "");
+  if (!assignment_id) return;
+  const bill = parseRateField(formData.get("bill_rate"));
+  const pay = parseRateField(formData.get("pay_rate"));
+  const payload: Record<string, unknown> = {
+    assignment_id,
+    updated_at: new Date().toISOString(),
+  };
+  // Omit an invalid field so ON CONFLICT DO UPDATE leaves the prior value intact.
+  if (bill.present) payload.bill_rate = bill.value;
+  if (pay.present) payload.pay_rate = pay.value;
+  await supabase.from("assignment_rates").upsert(payload, { onConflict: "assignment_id" });
+  await logAudit("set_rate", {
+    target: assignment_id,
+    metadata: { bill_rate: bill.present ? bill.value : undefined, pay_rate: pay.present ? pay.value : undefined },
+  });
+  revalidatePath("/admin");
+  revalidatePath("/admin/books");
 }

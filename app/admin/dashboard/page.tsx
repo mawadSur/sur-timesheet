@@ -52,6 +52,9 @@ export default async function Dashboard() {
             <Link className="navlink" href="/admin">
               Admin
             </Link>
+            <Link className="navlink" href="/admin/books">
+              Books
+            </Link>
             <Link className="navlink" href="/">
               Timesheet
             </Link>

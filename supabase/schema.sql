@@ -297,3 +297,27 @@ create policy time_off_select on public.time_off
 drop policy if exists time_off_write_admin on public.time_off;
 create policy time_off_write_admin on public.time_off
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- ============================================================================
+--  PHASE 4 — billing & books (M1: rates + margin)
+--  Idempotent. Additive + admin-only. Employee flows are untouched.
+-- ============================================================================
+
+-- Per-assignment rates. Deliberately a SEPARATE, admin-only table (not columns
+-- on `assignments`) so bill/pay rates NEVER appear on employee-readable
+-- assignment rows. Money lives only where is_admin() can reach it.
+create table if not exists public.assignment_rates (
+  assignment_id uuid primary key references public.assignments(id) on delete cascade,
+  bill_rate  numeric(10,2),   -- what the client pays per hour (revenue side)
+  pay_rate   numeric(10,2),   -- what we pay the consultant per hour (cost side)
+  updated_at timestamptz not null default now()
+);
+
+alter table public.assignment_rates enable row level security;
+drop policy if exists assignment_rates_admin on public.assignment_rates;
+create policy assignment_rates_admin on public.assignment_rates
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- Billing metadata on projects. Used by the invoice phases (M2); harmless now.
+alter table public.projects add column if not exists bill_to text;
+alter table public.projects add column if not exists payment_terms_days integer not null default 30;

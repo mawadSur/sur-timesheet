@@ -9,6 +9,8 @@ import {
   deleteProject,
   assignProject,
   unassignProject,
+  setProfileName,
+  setAssignmentRate,
   signOut,
 } from "@/app/actions";
 import AdminCredentials from "@/components/AdminCredentials";
@@ -19,23 +21,36 @@ type Named = { full_name: string | null; email: string } | null;
 export default async function Admin() {
   const supabase = await createClient();
 
-  const [{ data: allowed }, { data: profiles }, { data: projects }, { data: assignments }, { data: timesheets }] =
-    await Promise.all([
-      supabase.from("allowed_emails").select("email, role, is_active").order("email"),
-      supabase.from("profiles").select("id, full_name, email, role").order("email"),
-      supabase.from("projects").select("id, name, starts_on, ends_on, vm_host").order("name"),
-      supabase
-        .from("assignments")
-        .select("id, profiles(full_name, email), projects(name)")
-        .order("assigned_at", { ascending: false }),
-      supabase
-        .from("timesheets")
-        .select("work_date, hours, notes, profiles(full_name, email), projects(name)")
-        .order("created_at", { ascending: false })
-        .limit(100),
-    ]);
+  const [
+    { data: allowed },
+    { data: profiles },
+    { data: projects },
+    { data: assignments },
+    { data: rates },
+    { data: timesheets },
+  ] = await Promise.all([
+    supabase.from("allowed_emails").select("email, role, is_active").order("email"),
+    supabase.from("profiles").select("id, full_name, email, role").order("email"),
+    supabase.from("projects").select("id, name, starts_on, ends_on, vm_host").order("name"),
+    supabase
+      .from("assignments")
+      .select("id, profiles(full_name, email), projects(name)")
+      .order("assigned_at", { ascending: false }),
+    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate"),
+    supabase
+      .from("timesheets")
+      .select("work_date, hours, notes, profiles(full_name, email), projects(name)")
+      .order("created_at", { ascending: false })
+      .limit(100),
+  ]);
 
   const registered = new Set((profiles ?? []).map((p) => p.email.toLowerCase()));
+  const profileByEmail = new Map(
+    (profiles ?? []).map((p) => [p.email.toLowerCase(), p])
+  );
+  const rateByAssignment = new Map(
+    (rates ?? []).map((r: any) => [r.assignment_id, r])
+  );
   const totalHours = (timesheets ?? []).reduce((s, t) => s + Number(t.hours), 0);
   const name = (n: Named) => n?.full_name || n?.email || "—";
 
@@ -51,6 +66,9 @@ export default async function Admin() {
           <nav className="topnav">
             <Link className="navlink" href="/admin/dashboard">
               Dashboard
+            </Link>
+            <Link className="navlink" href="/admin/books">
+              Books
             </Link>
             <Link className="navlink" href="/">
               Timesheet
@@ -94,15 +112,36 @@ export default async function Admin() {
             <thead>
               <tr>
                 <th>Email</th>
+                <th>Name</th>
                 <th>Role</th>
                 <th>Status</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {(allowed ?? []).map((a) => (
+              {(allowed ?? []).map((a) => {
+                const prof = profileByEmail.get(a.email.toLowerCase());
+                return (
                 <tr key={a.email}>
                   <td>{a.email}</td>
+                  <td>
+                    {prof ? (
+                      <form action={setProfileName} className="row-form">
+                        <input type="hidden" name="id" value={prof.id} />
+                        <input
+                          name="full_name"
+                          defaultValue={prof.full_name || ""}
+                          placeholder="Add name"
+                          style={{ maxWidth: 170 }}
+                        />
+                        <button type="submit" className="btn-sm">
+                          Save
+                        </button>
+                      </form>
+                    ) : (
+                      <span className="muted-cell">After sign-in</span>
+                    )}
+                  </td>
                   <td>
                     <form action={setRole} className="row-form">
                       <input type="hidden" name="email" value={a.email} />
@@ -134,10 +173,11 @@ export default async function Admin() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {(allowed ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={4} className="muted-cell">
+                  <td colSpan={5} className="muted-cell">
                     No one added yet.
                   </td>
                 </tr>
@@ -228,7 +268,10 @@ export default async function Admin() {
         <section className="card">
           <h2 className="card-title">Assign people to projects</h2>
           <p className="intro">
-            People appear here once they&apos;ve signed in at least once.
+            People appear here once they&apos;ve signed in at least once. Set a
+            bill rate (what the client pays) and pay rate (what the consultant
+            earns) per assignment &mdash; these are admin-only and drive the{" "}
+            <Link href="/admin/books">Books</Link>.
           </p>
           <form action={assignProject} className="inline-form">
             <select name="user_id" required defaultValue="">
@@ -237,7 +280,7 @@ export default async function Admin() {
               </option>
               {(profiles ?? []).map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.full_name || p.email}
+                  {p.full_name ? `${p.full_name} (${p.email})` : p.email}
                 </option>
               ))}
             </select>
@@ -261,6 +304,7 @@ export default async function Admin() {
               <tr>
                 <th>Person</th>
                 <th>Project</th>
+                <th>Bill / Pay ($/h)</th>
                 <th></th>
               </tr>
             </thead>
@@ -269,6 +313,42 @@ export default async function Admin() {
                 <tr key={a.id}>
                   <td>{name(a.profiles)}</td>
                   <td>{a.projects?.name ?? "—"}</td>
+                  <td>
+                    <form action={setAssignmentRate} className="row-form">
+                      <input type="hidden" name="assignment_id" value={a.id} />
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        Bill
+                        <input
+                          name="bill_rate"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100000"
+                          placeholder="bill"
+                          title="Client bill rate per hour"
+                          defaultValue={rateByAssignment.get(a.id)?.bill_rate ?? ""}
+                          style={{ maxWidth: 72 }}
+                        />
+                      </label>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        Pay
+                        <input
+                          name="pay_rate"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100000"
+                          placeholder="pay"
+                          title="Consultant pay rate per hour"
+                          defaultValue={rateByAssignment.get(a.id)?.pay_rate ?? ""}
+                          style={{ maxWidth: 72 }}
+                        />
+                      </label>
+                      <button type="submit" className="btn-sm">
+                        Save
+                      </button>
+                    </form>
+                  </td>
                   <td className="right">
                     <form action={unassignProject}>
                       <input type="hidden" name="id" value={a.id} />
@@ -281,7 +361,7 @@ export default async function Admin() {
               ))}
               {(assignments ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={3} className="muted-cell">
+                  <td colSpan={4} className="muted-cell">
                     No assignments yet.
                   </td>
                 </tr>
