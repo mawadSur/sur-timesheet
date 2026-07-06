@@ -1,8 +1,15 @@
-// Shared money-layer helpers for the admin Books page and its CSV export.
+// Shared money-layer helpers for the admin Books page, invoices, and CSV export.
 // Keeping the month window, rate lookup and cents math in one place guarantees
-// the on-screen books and the exported CSV can never silently diverge.
+// the on-screen books, the invoices and the exported CSV can never diverge.
 //
 // Money is admin-only and computed/aggregated in integer cents.
+//
+// Billing model (per assignment):
+//   - pay_rate is REQUIRED for a line to be "complete" — you always have a cost
+//     for hours worked. A missing pay_rate is the only thing the guard warns on.
+//   - bill_rate is OPTIONAL. Present  => billable (client revenue + margin).
+//                            Absent   => overhead (internal / staff time: cost
+//                                        only, never invoiced to a client).
 
 type Rate = { bill_rate: number | null; pay_rate: number | null };
 
@@ -44,20 +51,32 @@ export function buildRateByPair(
   return rateByPair;
 }
 
-// Turn one timesheet line into money. Revenue and cost are only counted when
-// BOTH rates are present, so a half-configured pair (bill set, pay missing, or
-// vice versa) contributes no money and is surfaced by the missing-rate guard —
-// this keeps the totals honest and consistent between the page and the CSV.
-export function lineMoneyCents(
-  hours: number,
-  rate: Rate | undefined
-): { bill: number | null; pay: number | null; revCents: number | null; costCents: number | null } {
+export type LineMoney = {
+  bill: number | null;
+  pay: number | null;
+  missingPay: boolean; // pay rate absent — the only "incomplete" state we warn on
+  billable: boolean; // both rates present — counts as client revenue + cost
+  revCents: number | null; // client revenue (billable only)
+  billableCostCents: number | null; // our cost of billable hours
+  overheadCents: number | null; // our cost of non-billable (overhead) hours
+};
+
+// Turn one timesheet line into money under the per-assignment billing model.
+export function lineMoneyCents(hours: number, rate: Rate | undefined): LineMoney {
   const bill = rate?.bill_rate ?? null;
   const pay = rate?.pay_rate ?? null;
-  const rated = bill != null && pay != null;
-  const revCents = rated ? Math.round(hours * Number(bill) * 100) : null;
-  const costCents = rated ? Math.round(hours * Number(pay) * 100) : null;
-  return { bill, pay, revCents, costCents };
+  const missingPay = pay == null;
+  const billable = pay != null && bill != null;
+  const overhead = pay != null && bill == null;
+  return {
+    bill,
+    pay,
+    missingPay,
+    billable,
+    revCents: billable ? Math.round(hours * Number(bill) * 100) : null,
+    billableCostCents: billable ? Math.round(hours * Number(pay) * 100) : null,
+    overheadCents: overhead ? Math.round(hours * Number(pay) * 100) : null,
+  };
 }
 
 // Fetch every row of a query, paging in chunks so a busy month is never
@@ -74,4 +93,43 @@ export async function fetchAllRows(
     if (rows.length < pageSize) break;
   }
   return all;
+}
+
+// Aggregate a project's BILLABLE hours for a period into one invoice line per
+// consultant (hours × bill_rate). Overhead (no bill rate) is never invoiced.
+// Returns snapshot-ready lines; totals are summed in integer cents.
+export function billableInvoiceLines(
+  rows: any[],
+  rateByPair: Map<string, Rate>
+): { user_id: string; name: string; hours: number; bill_rate: number; amount_cents: number }[] {
+  const byUser = new Map<
+    string,
+    { user_id: string; name: string; hours: number; bill_rate: number; amount_cents: number }
+  >();
+  for (const t of rows) {
+    const hrs = Number(t.hours) || 0;
+    const rate = rateByPair.get(`${t.user_id}:${t.project_id}`);
+    const bill = rate?.bill_rate ?? null;
+    const pay = rate?.pay_rate ?? null;
+    if (bill == null || pay == null) continue; // billable only (both rates present)
+    const name = t.profiles?.full_name || t.profiles?.email || "—";
+    const line =
+      byUser.get(t.user_id) ??
+      { user_id: t.user_id, name, hours: 0, bill_rate: Number(bill), amount_cents: 0 };
+    line.hours += hrs;
+    line.amount_cents += Math.round(hrs * Number(bill) * 100);
+    byUser.set(t.user_id, line);
+  }
+  return [...byUser.values()].sort((a, b) => b.amount_cents - a.amount_cents);
+}
+
+// Format integer cents as USD; sign sits outside the symbol ("-$1,234.00").
+export function usdCents(cents: number): string {
+  return (
+    (cents < 0 ? "-$" : "$") +
+    Math.abs(cents / 100).toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  );
 }

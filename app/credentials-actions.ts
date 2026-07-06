@@ -122,6 +122,9 @@ export async function getProjectCredentials(
     .eq("id", user.id)
     .single();
 
+  // Staff are blocked from the vault even on projects they're assigned to.
+  if (profile?.role === "staff") return { ok: false, error: "Not authorized." };
+
   let authorized = profile?.role === "admin";
   if (!authorized) {
     const { data: assignment } = await supabase

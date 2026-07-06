@@ -5,6 +5,14 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { logAudit } from "@/lib/audit";
 
+// Valid account roles. "staff" is a restricted support type (logs hours, blocked
+// from the credentials vault); "employee" is a normal consultant; "admin" manages.
+const ROLES = ["employee", "staff", "admin"] as const;
+const asRole = (v: FormDataEntryValue | null): "employee" | "staff" | "admin" => {
+  const s = String(v ?? "");
+  return (ROLES as readonly string[]).includes(s) ? (s as "employee" | "staff" | "admin") : "employee";
+};
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export async function signOut() {
   const supabase = await createClient();
@@ -80,11 +88,9 @@ export async function submitTimesheet(payload: SubmitPayload) {
 export async function addAllowedEmail(formData: FormData) {
   const supabase = await requireAdmin();
   const email = String(formData.get("email") || "").trim().toLowerCase();
-  const role = String(formData.get("role") || "employee");
+  const role = asRole(formData.get("role"));
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return;
-  await supabase
-    .from("allowed_emails")
-    .upsert({ email, role: role === "admin" ? "admin" : "employee" });
+  await supabase.from("allowed_emails").upsert({ email, role });
   await logAudit("add_allowed_email", { target: email });
   revalidatePath("/admin");
 }
@@ -101,7 +107,7 @@ export async function removeAllowedEmail(formData: FormData) {
 export async function setRole(formData: FormData) {
   const supabase = await requireAdmin();
   const email = String(formData.get("email") || "").trim().toLowerCase();
-  const role = String(formData.get("role") || "employee") === "admin" ? "admin" : "employee";
+  const role = asRole(formData.get("role"));
   if (!email) return;
   await supabase.from("allowed_emails").update({ role }).eq("email", email);
   await supabase.from("profiles").update({ role }).eq("email", email);

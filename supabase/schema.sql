@@ -321,3 +321,120 @@ create policy assignment_rates_admin on public.assignment_rates
 -- Billing metadata on projects. Used by the invoice phases (M2); harmless now.
 alter table public.projects add column if not exists bill_to text;
 alter table public.projects add column if not exists payment_terms_days integer not null default 30;
+
+-- ============================================================================
+--  PHASE 5 — M2: client invoices + AR aging
+--  Idempotent. Additive + admin-only.
+-- ============================================================================
+
+-- One invoice per project per period (month). invoice_number is assigned when
+-- the invoice is sent (draft invoices have no number yet). Money is stored in
+-- integer cents as a snapshot frozen at send time.
+create table if not exists public.invoices (
+  id                    uuid primary key default gen_random_uuid(),
+  project_id            uuid not null references public.projects(id) on delete restrict,
+  invoice_number        text unique,
+  period_start          date not null,
+  period_end            date not null,
+  status                text not null default 'draft' check (status in ('draft','sent','paid','void')),
+  issued_on             date,
+  due_on                date,
+  paid_on               date,
+  subtotal_cents        bigint not null default 0,
+  adjustment_cents      bigint not null default 0,
+  total_cents           bigint not null default 0,
+  amount_received_cents bigint not null default 0,
+  bill_to               text,
+  notes                 text,
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+  unique (project_id, period_start, period_end)
+);
+
+-- Snapshot line items, frozen when the invoice is sent (one per consultant).
+create table if not exists public.invoice_lines (
+  id           uuid primary key default gen_random_uuid(),
+  invoice_id   uuid not null references public.invoices(id) on delete cascade,
+  user_id      uuid references public.profiles(id) on delete set null,
+  description  text not null,
+  hours        numeric(8,2) not null,
+  bill_rate    numeric(10,2) not null,
+  amount_cents bigint not null
+);
+
+alter table public.invoices      enable row level security;
+alter table public.invoice_lines enable row level security;
+drop policy if exists invoices_admin on public.invoices;
+create policy invoices_admin on public.invoices
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists invoice_lines_admin on public.invoice_lines;
+create policy invoice_lines_admin on public.invoice_lines
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- Sequential invoice numbers: INV-YYYY-0001. The sequence guarantees no race.
+create sequence if not exists public.invoice_seq;
+create or replace function public.next_invoice_number()
+returns text
+language sql
+security definer
+set search_path = public
+as $$
+  select 'INV-' || to_char(now(), 'YYYY') || '-' || lpad(nextval('public.invoice_seq')::text, 4, '0');
+$$;
+
+-- ============================================================================
+--  PHASE 6 — "Staff" role: a restricted support type
+--  Staff log hours like employees but are blocked from project credentials.
+--  Idempotent.
+-- ============================================================================
+
+-- Allow the new role value on both tables (drop + re-add the inline check).
+alter table public.profiles       drop constraint if exists profiles_role_check;
+alter table public.profiles       add  constraint profiles_role_check       check (role in ('employee','staff','admin'));
+alter table public.allowed_emails drop constraint if exists allowed_emails_role_check;
+alter table public.allowed_emails add  constraint allowed_emails_role_check check (role in ('employee','staff','admin'));
+
+-- Helper mirroring is_admin(): am I a staff member? (security definer avoids recursion)
+create or replace function public.is_staff()
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.profiles where id = auth.uid() and role = 'staff'
+  );
+$$;
+
+-- Credentials: admin sees all; assigned NON-staff users see their projects'.
+-- Staff are blocked from the vault even on projects they're assigned to.
+drop policy if exists credentials_select on public.credentials;
+create policy credentials_select on public.credentials
+  for select to authenticated using (
+    public.is_admin() or (
+      not public.is_staff() and exists (
+        select 1 from public.assignments a
+        where a.project_id = credentials.project_id and a.user_id = auth.uid()
+      )
+    )
+  );
+
+-- ============================================================================
+--  PHASE 7 — RescueTime bridge: window-title keyword -> project rules
+--  The RescueTime API tracks time by app/site/window title, not by project, so
+--  these rules map title keywords to projects to suggest per-project hours.
+--  Admin-only. The RescueTime API key itself lives in the RESCUETIME_API_KEY
+--  env var (server-only), not the DB. Idempotent.
+-- ============================================================================
+create table if not exists public.rescuetime_rules (
+  id         uuid primary key default gen_random_uuid(),
+  keyword    text not null,
+  project_id uuid not null references public.projects(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+alter table public.rescuetime_rules enable row level security;
+drop policy if exists rescuetime_rules_admin on public.rescuetime_rules;
+create policy rescuetime_rules_admin on public.rescuetime_rules
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());

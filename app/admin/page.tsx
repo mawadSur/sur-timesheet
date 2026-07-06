@@ -70,6 +70,12 @@ export default async function Admin() {
             <Link className="navlink" href="/admin/books">
               Books
             </Link>
+            <Link className="navlink" href="/admin/invoices">
+              Invoices
+            </Link>
+            <Link className="navlink" href="/admin/rescuetime">
+              RescueTime
+            </Link>
             <Link className="navlink" href="/">
               Timesheet
             </Link>
@@ -101,6 +107,7 @@ export default async function Admin() {
             <input name="email" type="email" placeholder="person@email.com" required />
             <select name="role" defaultValue="employee">
               <option value="employee">Employee</option>
+              <option value="staff">Staff</option>
               <option value="admin">Admin</option>
             </select>
             <button type="submit" className="btn">
@@ -147,6 +154,7 @@ export default async function Admin() {
                       <input type="hidden" name="email" value={a.email} />
                       <select name="role" defaultValue={a.role}>
                         <option value="employee">Employee</option>
+                        <option value="staff">Staff</option>
                         <option value="admin">Admin</option>
                       </select>
                       <button type="submit" className="btn-sm">

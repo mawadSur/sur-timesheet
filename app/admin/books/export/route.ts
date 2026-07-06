@@ -2,8 +2,9 @@ import { createClient } from "@/lib/supabase/server";
 import { csvCell } from "@/lib/csv";
 import { resolveMonthWindow, buildRateByPair, lineMoneyCents, fetchAllRows } from "@/lib/books";
 
-// Money-aware timesheet export: hours × per-assignment rates → revenue/cost/margin.
-// Admin-only (middleware gates /admin, and we re-check here as defence in depth).
+// Money-aware timesheet export: hours × per-assignment rates → revenue/cost/margin,
+// with overhead (pay-only) broken out. Admin-only (middleware gates /admin, and
+// we re-check here as defence in depth).
 export async function GET(request: Request) {
   const supabase = await createClient();
   const {
@@ -18,7 +19,6 @@ export async function GET(request: Request) {
     .single();
   if (profile?.role !== "admin") return new Response("Forbidden", { status: 403 });
 
-  // Resolve the month window (defaults to the current month).
   const url = new URL(request.url);
   const { month, start, end } = resolveMonthWindow(url.searchParams.get("month") || "");
 
@@ -37,26 +37,17 @@ export async function GET(request: Request) {
   ]);
 
   const rateByPair = buildRateByPair(assignments, rates);
-
   const money = (cents: number) => (cents / 100).toFixed(2);
-  const header = [
-    "Date",
-    "Employee",
-    "Email",
-    "Project",
-    "Hours",
-    "Bill Rate",
-    "Pay Rate",
-    "Revenue",
-    "Cost",
-    "Margin",
-  ];
+  const header = ["Date", "Employee", "Email", "Project", "Hours", "Bill Rate", "Pay Rate", "Revenue", "Billable Cost", "Overhead", "Margin"];
   const lines = [header.join(",")];
 
   for (const t of rows as any[]) {
     const hrs = Number(t.hours) || 0;
-    const { bill, pay, revCents, costCents } = lineMoneyCents(hrs, rateByPair.get(`${t.user_id}:${t.project_id}`));
-    const marginCents = revCents != null && costCents != null ? revCents - costCents : null;
+    const { bill, pay, revCents, billableCostCents, overheadCents } = lineMoneyCents(
+      hrs,
+      rateByPair.get(`${t.user_id}:${t.project_id}`)
+    );
+    const marginCents = revCents != null && billableCostCents != null ? revCents - billableCostCents : null;
 
     lines.push(
       [
@@ -68,7 +59,8 @@ export async function GET(request: Request) {
         bill != null ? Number(bill).toFixed(2) : "",
         pay != null ? Number(pay).toFixed(2) : "",
         revCents != null ? money(revCents) : "",
-        costCents != null ? money(costCents) : "",
+        billableCostCents != null ? money(billableCostCents) : "",
+        overheadCents != null ? money(overheadCents) : "",
         marginCents != null ? money(marginCents) : "",
       ]
         .map(csvCell)

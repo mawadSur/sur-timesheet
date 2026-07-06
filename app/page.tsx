@@ -26,6 +26,9 @@ export default async function Home() {
     .order("name");
 
   const isAdmin = profile?.role === "admin";
+  // Staff are a restricted support type: they log hours but never see project
+  // credentials (RLS enforces this too — this just hides the reveal panel).
+  const isStaff = profile?.role === "staff";
   const firstName = (profile?.full_name || profile?.email || "there").split(" ")[0];
 
   return (
@@ -54,9 +57,10 @@ export default async function Home() {
 
       <main className="page">
         <p className="greeting">Hi {firstName} — log your hours below.</p>
-        {((projects as ProjectOption[]) ?? []).map((p) => (
-          <CredentialsPanel key={p.id} projectId={p.id} projectName={p.name} />
-        ))}
+        {!isStaff &&
+          ((projects as ProjectOption[]) ?? []).map((p) => (
+            <CredentialsPanel key={p.id} projectId={p.id} projectName={p.name} />
+          ))}
         <TimesheetForm projects={(projects as ProjectOption[]) ?? []} />
         <p className="foot">{BRAND.name} Portal · {profile?.email}</p>
       </main>
