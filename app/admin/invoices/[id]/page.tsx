@@ -98,6 +98,12 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
   const totalCents = subtotalCents + adjustmentCents;
   const drift = inv.status === "sent" && liveSubtotal != null && liveSubtotal !== Number(inv.subtotal_cents || 0);
 
+  // A partial payment records what's been received but keeps the invoice 'sent'
+  // (still outstanding). Surface how much is still owed.
+  const receivedCents = Number(inv.amount_received_cents || 0);
+  const balanceDueCents = totalCents - receivedCents;
+  const isPartiallyPaid = inv.status === "sent" && receivedCents > 0;
+
   return (
     <>
       <style>{`@media print { .topbar, .no-print { display: none !important; } .page { padding-top: 20px; } }`}</style>
@@ -187,6 +193,18 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
                 <td colSpan={3} className="right"><strong>Total</strong></td>
                 <td className="right"><strong>{usdCents(totalCents)}</strong></td>
               </tr>
+              {isPartiallyPaid && (
+                <>
+                  <tr>
+                    <td colSpan={3} className="right">Amount received{inv.paid_on ? ` (${inv.paid_on})` : ""}</td>
+                    <td className="right">{usdCents(-receivedCents)}</td>
+                  </tr>
+                  <tr>
+                    <td colSpan={3} className="right"><strong>Balance due</strong></td>
+                    <td className="right"><strong>{usdCents(balanceDueCents)}</strong></td>
+                  </tr>
+                </>
+              )}
             </tfoot>
           </table>
 
@@ -243,6 +261,11 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
 
               {inv.status === "sent" && (
                 <>
+                  {isPartiallyPaid && (
+                    <span className="badge" title="A partial payment has been recorded; this invoice is still open">
+                      {usdCents(receivedCents)} received · {usdCents(balanceDueCents)} balance due
+                    </span>
+                  )}
                   <form action={markInvoicePaid} className="row-form">
                     <input type="hidden" name="id" value={inv.id} />
                     <input name="paid_on" type="date" title="Date paid (defaults to today)" />

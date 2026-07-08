@@ -2,6 +2,7 @@ import Link from "next/link";
 import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/actions";
+import { projectPhase } from "@/lib/dates";
 
 // Inline-style colors for each status value.
 function statusStyle(status: string | null): React.CSSProperties {
@@ -34,7 +35,7 @@ export default async function Dashboard() {
 
   const { data: projects } = await supabase
     .from("projects")
-    .select("id, name, status, pay_type, ends_on, manager_name")
+    .select("id, name, status, pay_type, starts_on, ends_on, manager_name")
     .order("name");
 
   const list = (projects ?? []) as any[];
@@ -83,7 +84,9 @@ export default async function Dashboard() {
                 marginTop: 16,
               }}
             >
-              {list.map((p) => (
+              {list.map((p) => {
+                const phase = projectPhase(p.starts_on, p.ends_on);
+                return (
                 <Link
                   key={p.id}
                   href={`/admin/projects/${p.id}`}
@@ -111,6 +114,9 @@ export default async function Dashboard() {
                     >
                       {p.pay_type || "— pay"}
                     </span>
+                    <span className={phase === "active" ? "badge badge-ok" : "badge"}>
+                      {phase === "ended" ? "Ended" : phase === "upcoming" ? "Upcoming" : "Active"}
+                    </span>
                   </div>
                   <div style={{ fontSize: 13, color: "#5b6470" }}>
                     Manager: {p.manager_name || "—"}
@@ -121,7 +127,8 @@ export default async function Dashboard() {
                     </div>
                   )}
                 </Link>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>

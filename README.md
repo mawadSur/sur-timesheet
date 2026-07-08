@@ -4,12 +4,14 @@ An internal team portal for Sur. Employees **sign in with Google**, an admin
 **assigns them to projects**, and everyone logs hours against their assigned
 projects. Built on Next.js + Supabase, deployed on Vercel.
 
-> **Phase 1 (this release):** Google login · email allowlist · admin panel to
-> manage people, projects & assignments · timesheets in the database · CSV export.
+> **Shipped:** Google login · email allowlist · admin panel (people, projects &
+> assignments) · timesheets + CSV export · encrypted VM/PiKVM credentials vault ·
+> audit log · access revocation + auth-account hard-delete · billing/invoices &
+> AR aging · project durations · continuous feedback · RescueTime bridge.
 >
-> **Roadmap:** per-project encrypted VM/PiKVM credentials vault → Tailscale
-> auto-provisioning (invite + ACLs) → Discord channel access → project durations
-> & continuous feedback.
+> **Scaffolded (needs secrets + design decisions to switch on):** Tailscale
+> auto-provisioning (invite + ACLs) and Discord channel access — see
+> [`TODOS.md`](./TODOS.md).
 
 ---
 
@@ -30,6 +32,13 @@ client. Both use **your** accounts, so these steps are yours to run.
   seeds **you** (`mawad10101@gmail.com`) as the first admin. Change that line
   first if you want a different admin.
 
+> ⚠️ **Migration reminder:** `supabase/schema.sql` is the source of truth and has
+> grown newer objects — the **`feedback`** table (+ RLS) and the
+> **`profiles.discord_user_id`** column. If your database predates them, **re-run
+> `supabase/schema.sql` against Supabase before the continuous-feedback UI or
+> Discord provisioning will work at runtime.** The script is idempotent, so
+> re-running on an existing DB is safe.
+
 ### 3. Turn on Google login
 - In Supabase: **Authentication → Providers → Google → enable**.
 - Create a Google OAuth client at
@@ -47,9 +56,23 @@ client. Both use **your** accounts, so these steps are yours to run.
 ```bash
 vercel env add NEXT_PUBLIC_SUPABASE_URL        # paste Project URL
 vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY   # paste anon key
+vercel env add CREDS_ENCRYPTION_KEY            # 64 hex chars — enables the vault
 vercel --prod                                  # redeploy
 ```
 (Add to all environments when prompted so previews work too.)
+
+**Optional / feature-gated env vars** — set these only when you turn the matching
+feature on; each integration cleanly no-ops while its var is unset (the cron is the
+exception — it fail-closes without its secret). See the full table in
+[`CLAUDE.md`](./CLAUDE.md#environment-variables).
+
+| Var | Enables |
+| --- | --- |
+| `SUPABASE_SERVICE_ROLE_KEY` | Admin-API paths: offboarding hard-delete, Discord-status cron, provisioning. **Server-only — never expose.** |
+| `CRON_SECRET` | Auth for `/api/cron/*`; the discord-status route **fail-closes** (401) without it. |
+| `DISCORD_BOT_TOKEN` | Discord status reads + channel-access grant/revoke. |
+| `ANTHROPIC_API_KEY` | Claude summarization in the discord-status cron. |
+| `TAILSCALE_API_KEY` + `TAILSCALE_TAILNET` | Tailscale auto-invite / ACL provisioning. |
 
 That's it — sign in with Google at the site, and you'll land in `/admin`.
 
@@ -75,9 +98,21 @@ No code changes or redeploys needed for any of this.
 
 ```bash
 npm install
-# put your Supabase URL + anon key in .env.local
+# put your Supabase URL + anon key (+ CREDS_ENCRYPTION_KEY) in .env.local
 npm run dev      # http://localhost:3000
+npm test         # vitest run
 ```
+
+---
+
+## Maintenance & operations
+
+- **Rotate the vault key** — runbook + script (`scripts/rotate-creds-key.mjs`) for
+  rotating `CREDS_ENCRYPTION_KEY` without data loss:
+  [`docs/CREDS_ROTATION.md`](./docs/CREDS_ROTATION.md).
+- **Backups & restore** — database backup / retention / restore policy
+  (managed daily backups + PITR, plus a `pg_dump` secondary layer):
+  [`docs/BACKUPS.md`](./docs/BACKUPS.md).
 
 ---
 

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { requireAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import {
   resolveMonthWindow,
@@ -10,23 +10,6 @@ import {
   billableInvoiceLines,
   fetchAllRows,
 } from "@/lib/books";
-
-// Local admin gate (requireAdmin in app/actions.ts is private and must stay so —
-// a "use server" export returning a client would be an exposed action).
-async function requireAdmin() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not signed in.");
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-  if (profile?.role !== "admin") throw new Error("Admins only.");
-  return supabase;
-}
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -53,7 +36,7 @@ async function computeBillable(supabase: any, projectId: string, start: string, 
 
 // Create (or open) a draft invoice for a project × month.
 export async function generateInvoice(formData: FormData) {
-  const supabase = await requireAdmin();
+  const { supabase } = await requireAdmin();
   const project_id = String(formData.get("project_id") || "");
   const month = String(formData.get("month") || "");
   if (!project_id) return;
@@ -96,7 +79,7 @@ export async function generateInvoice(formData: FormData) {
 
 // Refresh a draft's preview total from current timesheets.
 export async function regenerateInvoice(formData: FormData) {
-  const supabase = await requireAdmin();
+  const { supabase } = await requireAdmin();
   const id = String(formData.get("id") || "");
   if (!id) return;
   const { data: inv } = await supabase
@@ -119,7 +102,7 @@ export async function regenerateInvoice(formData: FormData) {
 
 // Freeze the snapshot lines and mark the invoice sent.
 export async function sendInvoice(formData: FormData) {
-  const supabase = await requireAdmin();
+  const { supabase } = await requireAdmin();
   const id = String(formData.get("id") || "");
   if (!id) return;
   const { data: inv } = await supabase
@@ -174,31 +157,38 @@ export async function sendInvoice(formData: FormData) {
 }
 
 export async function markInvoicePaid(formData: FormData) {
-  const supabase = await requireAdmin();
+  const { supabase } = await requireAdmin();
   const id = String(formData.get("id") || "");
   if (!id) return;
   const { data: inv } = await supabase.from("invoices").select("total_cents, status").eq("id", id).single();
-  if (!inv || (inv.status !== "sent" && inv.status !== "paid")) return;
+  if (!inv || inv.status !== "sent") return; // only a sent invoice can be paid; paid/void are terminal
   const paidField = String(formData.get("paid_on") || "").trim();
   const paid_on = /^\d{4}-\d{2}-\d{2}$/.test(paidField) ? paidField : iso(new Date());
   const recvField = String(formData.get("amount_received") || "").trim();
+  const total_cents = Number(inv.total_cents || 0);
   const amount_received_cents =
     recvField !== "" && Number.isFinite(Number(recvField))
-      ? Math.round(Number(recvField) * 100)
-      : Number(inv.total_cents || 0);
+      ? Math.max(0, Math.round(Number(recvField) * 100))
+      : total_cents;
+  // Full payment (>= total) closes the invoice as 'paid'; a partial payment stays
+  // 'sent' (still outstanding for AR aging) while recording what's been received.
+  const status = amount_received_cents >= total_cents ? "paid" : "sent";
   await supabase
     .from("invoices")
-    .update({ status: "paid", paid_on, amount_received_cents, updated_at: new Date().toISOString() })
+    .update({ status, paid_on, amount_received_cents, updated_at: new Date().toISOString() })
     .eq("id", id);
-  await logAudit("pay_invoice", { target: id, metadata: { amount_received_cents } });
+  await logAudit("pay_invoice", { target: id, metadata: { amount_received_cents, status } });
   revalidatePath("/admin/invoices");
   revalidatePath(`/admin/invoices/${id}`);
 }
 
 export async function voidInvoice(formData: FormData) {
-  const supabase = await requireAdmin();
+  const { supabase } = await requireAdmin();
   const id = String(formData.get("id") || "");
   if (!id) return;
+  const { data: inv } = await supabase.from("invoices").select("status").eq("id", id).single();
+  // Only a sent invoice can be voided: drafts are deleted, and paid/void are terminal.
+  if (!inv || inv.status !== "sent") return;
   await supabase
     .from("invoices")
     .update({ status: "void", updated_at: new Date().toISOString() })
@@ -210,7 +200,7 @@ export async function voidInvoice(formData: FormData) {
 
 // Edit adjustment / notes / bill-to (keeps total = subtotal + adjustment).
 export async function updateInvoice(formData: FormData) {
-  const supabase = await requireAdmin();
+  const { supabase } = await requireAdmin();
   const id = String(formData.get("id") || "");
   if (!id) return;
   const { data: inv } = await supabase.from("invoices").select("subtotal_cents, status").eq("id", id).single();
@@ -235,7 +225,7 @@ export async function updateInvoice(formData: FormData) {
 }
 
 export async function deleteInvoice(formData: FormData) {
-  const supabase = await requireAdmin();
+  const { supabase } = await requireAdmin();
   const id = String(formData.get("id") || "");
   if (!id) return;
   const { data: inv } = await supabase.from("invoices").select("status").eq("id", id).single();

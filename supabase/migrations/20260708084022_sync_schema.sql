@@ -1,10 +1,42 @@
 -- ============================================================================
---  SUR PORTAL — Phase 1 schema
---  Paste this whole file into the Supabase SQL Editor and run it once.
---  Safe to re-run (uses IF NOT EXISTS / CREATE OR REPLACE / DROP POLICY IF EXISTS).
+--  MIGRATION: 20260708084022_sync_schema
+--
+--  WHAT THIS DOES
+--    Brings the LIVE database into sync with supabase/schema.sql. The live DB is
+--    behind the repo schema — most importantly it is missing the M1 table
+--    public.assignment_rates, which is why saving a bill/pay rate (which writes to
+--    public.assignment_rates) is broken, along with the Books/invoices and
+--    RescueTime features. This migration ensures every post-Phase-1 object exists:
+--    assignment_rates, invoices + invoice_lines (+ invoice number sequence/fn),
+--    rescuetime_rules, the 'staff' role widening + is_staff() + the staff
+--    credentials block, project metadata/billing columns, time_off, feedback,
+--    profiles.discord_user_id, and the de-duplicated handle_new_user trigger.
+--
+--  IDEMPOTENT & SAFE ON AN EXISTING DB
+--    Generated from supabase/schema.sql, which is itself idempotent. Every
+--    statement is safe to run on a DB that already has some or all of these
+--    objects: create table if not exists, alter table ... add column if not
+--    exists, drop constraint if exists / add constraint, drop policy if exists /
+--    create policy, create or replace function, create sequence if not exists,
+--    create index if not exists, drop trigger if exists / create trigger, and
+--    insert ... on conflict for the single admin seed row. It contains NO bare
+--    create table/create index, and NO drop table/truncate. Running it against a
+--    fully up-to-date DB is a no-op; running it against the Phase-1 baseline
+--    (allowed_emails, profiles, projects, assignments, timesheets, credentials,
+--    audit_log) brings it fully up to date.
+--
+--  HOW TO APPLY (two paths)
+--    1) Supabase CLI:
+--         supabase link --project-ref <your-project-ref>   # first time only
+--         supabase db push
+--       (`db push` applies files in supabase/migrations/ in filename order.)
+--    2) Fallback — Supabase SQL Editor:
+--         Open the project in the Supabase dashboard → SQL Editor → New query,
+--         paste this whole file, and Run. Because it is idempotent it is safe to
+--         paste and run even if parts already exist.
 -- ============================================================================
 
--- ── Tables ──────────────────────────────────────────────────────────────────
+-- ── Tables (Phase 1 baseline — no-ops if already present) ────────────────────
 
 -- Who is allowed to sign in, and with what role. The admin manages this list.
 create table if not exists public.allowed_emails (
@@ -272,6 +304,8 @@ create policy time_off_write_admin on public.time_off
 -- ============================================================================
 --  PHASE 4 — billing & books (M1: rates + margin)
 --  Idempotent. Additive + admin-only. Employee flows are untouched.
+--  NOTE: public.assignment_rates below is the specific fix for the reported
+--  bill/pay-rate save bug — the app writes rates to this table.
 -- ============================================================================
 
 -- Per-assignment rates. Deliberately a SEPARATE, admin-only table (not columns

@@ -1,91 +1,73 @@
 # TODOS.md — Sur Portal backlog
 
-Prioritized backlog. Each item lists **What / Why / Effort (S/M/L) / Priority
-(P1–P3)** and **Depends on** where relevant.
+Prioritized backlog. Each open item lists **What / Why / Effort (S/M/L) /
+Priority (P1–P3)** and **Depends on**.
+
+> ⚠️ **Apply the schema migration first.** `supabase/schema.sql` has new objects —
+> the **`feedback`** table (+ index/RLS) and the **`profiles.discord_user_id`**
+> column — that the feedback UI and Discord provisioning need at runtime. Re-run
+> `supabase/schema.sql` against the live DB (idempotent; safe on an existing DB).
 
 ---
 
-## Wire up existing Phase 2 UI
+<details>
+<summary><strong>Recently shipped ✅</strong> (click to expand)</summary>
 
-These pieces are built but not yet surfaced in the admin panel
-(`app/admin/page.tsx`). Doing this first unlocks the features already shipped.
+- **Phase 2 UI wired into `/admin`** — credentials vault, revoke/restore, `/admin/audit` link.
+- **Project durations** — editable `starts_on`/`ends_on` + auto Active/Ended/Upcoming badges (`lib/dates.ts`).
+- **Hard-delete offboarding** — `deleteUserAccount` via `createAdminClient()`; revoked-users only, self-delete guard, clean no-op without the service-role key.
+- **`CREDS_ENCRYPTION_KEY` rotation** — `scripts/rotate-creds-key.mjs` (two-pass, `--dry-run`, aborts before partial writes) + `docs/CREDS_ROTATION.md`; `lib/crypto.ts` takes an optional explicit key.
+- **Test coverage broadened** — `books` / `csv` / `dates` / `rescuetime` / `requireAdmin` (`lib/auth.ts`); 58 passing (+3 env-gated RLS smoke).
+- **Bug fixes** — AR aging now counts partial payments (`markInvoicePaid` keeps partials `sent`); invoice void/pay state guards; RescueTime most-specific-keyword-wins + double-log guard; `/api/cron` fail-closed when `CRON_SECRET` is unset.
 
-- [ ] **Surface the credentials vault in `/admin`.**
-  - **What:** Render `AdminCredentials` per project (manage) and expose
-    `CredentialsPanel` to assigned users so they can reveal project secrets.
-  - **Why:** The vault, encryption, RLS, and audit logging all exist; the admin
-    page just doesn't render them yet.
-  - **Effort:** S · **Priority:** P1
-- [ ] **Surface revoke/restore + the audit log link in `/admin`.**
-  - **What:** Add `UserAccessControls` (revoke/restore) to the People table and a
-    nav link to `/admin/audit`; show `is_active` status.
-  - **Why:** `revokeUser` / `restoreUser` and `/admin/audit` exist but aren't
-    reachable from the UI.
-  - **Effort:** S · **Priority:** P1
+</details>
 
 ---
 
-## Roadmap
+## Remaining / partial
 
-- [ ] **Phase 3 — Tailscale auto-invite + ACLs on assignment.**
-  - **What:** When an admin assigns someone to a project, call the Tailscale API
-    to invite that person's Google email to the tailnet and set ACL grants so they
-    can reach only their project's tagged VM/PiKVM devices. Remove access on
-    unassign/revoke.
-  - **Why:** Closes the loop from "assigned in the portal" to "can actually reach
-    the box," with least-privilege network access.
-  - **Effort:** L · **Priority:** P1
-  - **Depends on:** a Tailscale API token (server secret) + an agreed device
-    **tag scheme** (the `projects.tailscale_tag` column already exists).
-- [ ] **Discord channel auto-access.**
-  - **What:** On assignment, auto-grant the person access to the project's Discord
-    channel; revoke on unassign.
+- [ ] **Tailscale auto-invite + ACLs on assignment — SCAFFOLDED.**
+  - **What:** `lib/tailscale.ts` (`grant/revokeTailscaleAccess`) is wired into
+    `assignProject` / `unassignProject` / `revokeUser` and no-ops until secrets are
+    set. Still stubbed: the project-tag → device-ACL grant (`TODO(tag-scheme)`), and
+    revoke only clears *pending* invites, not already-accepted members.
+  - **Why:** Closes the loop from "assigned in the portal" to "can reach the box,"
+    least-privilege.
+  - **Effort:** M · **Priority:** P1
+  - **Depends on:** `TAILSCALE_API_KEY` + `TAILSCALE_TAILNET` secrets **and** an
+    agreed device **tag scheme** (`projects.tailscale_tag` column exists).
+- [ ] **Discord channel auto-access — SCAFFOLDED.**
+  - **What:** `lib/discord.ts` (`grant/revokeDiscordChannelAccess`) is wired into
+    assign / unassign / revoke; no-ops until the bot token is set and a user's
+    Discord identity is known.
   - **Why:** Same provisioning convenience as Tailscale, for team comms.
   - **Effort:** M · **Priority:** P2
-  - **Depends on:** a Discord bot + users linking their Discord identity to their
-    portal account.
-- [ ] **Project durations UI.**
-  - **What:** Surface `starts_on` / `ends_on` in the admin project editor and in
-    reports (e.g. flag active vs. ended projects).
-  - **Why:** The columns already exist in `projects` and are captured on create,
-    but aren't meaningfully used beyond display.
-  - **Effort:** S · **Priority:** P2
-- [ ] **Continuous feedback module.**
-  - **What:** New table + UI for ongoing per-person / per-project notes (running
-    feedback log rather than point-in-time reviews).
-  - **Why:** Lightweight continuous feedback was part of the original roadmap.
-  - **Effort:** M · **Priority:** P2
-  - **Depends on:** new table + RLS policies in `supabase/schema.sql`.
-
----
-
-## Hardening follow-ups
-
-- [ ] **Hard-delete an auth account on offboarding.**
-  - **What:** On full offboarding, delete the user's Supabase `auth.users` row (not
-    just flip `is_active`).
-  - **Why:** `is_active` only locks the user out; the account still exists. A true
-    delete is cleaner for departures.
-  - **Effort:** M · **Priority:** P2
-  - **Depends on:** a **service-role** Supabase admin client (server-only, tightly
-    scoped — currently the codebase has none by design).
-- [ ] **Document a `CREDS_ENCRYPTION_KEY` rotation procedure.**
-  - **What:** Write + script a key-rotation flow: decrypt all `credentials` with the
-    old key and re-encrypt with the new one, then swap the env var on Vercel.
-  - **Why:** Vault secrets are only as safe as the key; rotation must be possible
-    without data loss.
-  - **Effort:** M · **Priority:** P2
-- [ ] **Broaden test coverage to server actions.**
-  - **What:** Add tests around `submitTimesheet`, `requireAdmin`, allowlist/role
-    logic, and `getProjectCredentials` authorization paths.
-  - **Why:** Today only `lib/crypto.ts` is tested; the security-sensitive action
-    layer is uncovered.
-  - **Effort:** M · **Priority:** P2
-- [ ] **Backups / retention policy for timesheets.**
-  - **What:** Define and configure backup + retention for the Postgres data
-    (timesheets are the payroll system-of-record).
-  - **Why:** This is financial source data; loss or corruption is costly.
+  - **Depends on:** `DISCORD_BOT_TOKEN` **and** a UI to capture each user's Discord
+    identity into `profiles.discord_user_id` (column added — **apply the migration**).
+- [ ] **Continuous feedback module — BUILT, needs migration.**
+  - **What:** `feedback` table + admin UI (`app/feedback-actions.ts`, surfaced on the
+    project page) for running per-person / per-project notes.
+  - **Why:** Lightweight continuous feedback was on the original roadmap.
+  - **Effort:** — (built) · **Priority:** P2
+  - **Depends on:** applying the `feedback` table + RLS migration from
+    `supabase/schema.sql`.
+- [ ] **Backups / retention policy — DOCUMENTED, needs enabling.**
+  - **What:** Policy + `scripts/backup-db.sh` (`pg_dump` secondary layer) live in
+    `docs/BACKUPS.md`; the primary layer (managed daily backups + PITR) still needs
+    turning on.
+  - **Why:** Timesheets are the payroll system-of-record; loss/corruption is costly.
   - **Effort:** S · **Priority:** P3
+  - **Depends on:** enabling **Supabase managed backups + PITR** (Pro plan) for
+    project `sur-timesheet`; back up `CREDS_ENCRYPTION_KEY` separately (dumps hold
+    only ciphertext).
+
+### Nice-to-have follow-ups
+
+- [ ] **CSV formula-injection guard** (S · P3) — `lib/csv.ts` emits `=`/`+`/`-`/`@`
+  cells verbatim; add a leading-quote neutralizer on the export path.
+- [ ] **Partial-payment UX** (S · P3) — `amount_received_cents` is an absolute total
+  (overwrite), so a top-up payment needs the *cumulative* amount; the "received /
+  balance due" badge helps, but a per-payment ledger would be cleaner if ever needed.
 
 ---
 

@@ -28,3 +28,10 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+# database backups (pg_dump output from scripts/backup-db.sh)
+/backups/
+
+# local tooling caches
+.claude-flow/
+supabase/.temp/

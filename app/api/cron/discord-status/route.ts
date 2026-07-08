@@ -12,18 +12,19 @@ export const dynamic = "force-dynamic";
 type ProjectRow = { id: string; name: string | null; discord_channel_id: string | null };
 
 export async function GET(req: Request) {
-  // Auth: when CRON_SECRET is configured, require the Bearer header that Vercel
-  // Cron sends automatically. When it's not set, allow the request (so it works
-  // before the user configures it) but flag it in the response.
+  // Auth: fail closed. This route is exempt from the middleware auth gate (see
+  // the /api/cron public prefix), so it must authorize itself. Require the
+  // Bearer header that Vercel Cron sends automatically. If CRON_SECRET is not
+  // configured we reject rather than run the job, so the endpoint is never
+  // publicly reachable (which would let anyone trigger Discord fetch + Claude
+  // summarization).
   const cronSecret = process.env.CRON_SECRET;
-  let authNote: string | undefined;
-  if (cronSecret) {
-    const header = req.headers.get("authorization");
-    if (header !== `Bearer ${cronSecret}`) {
-      return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
-  } else {
-    authNote = "CRON_SECRET not set; request allowed without auth";
+  if (!cronSecret) {
+    return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+  const header = req.headers.get("authorization");
+  if (header !== `Bearer ${cronSecret}`) {
+    return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
   // Service-role client. Null when SUPABASE_SERVICE_ROLE_KEY/URL aren't set.
@@ -32,16 +33,15 @@ export async function GET(req: Request) {
     return Response.json({
       ok: false,
       skipped: "SUPABASE_SERVICE_ROLE_KEY not set",
-      authNote,
     });
   }
 
   // Short-circuit gracefully when the dependent integrations aren't configured.
   if (!process.env.DISCORD_BOT_TOKEN) {
-    return Response.json({ ok: false, skipped: "DISCORD_BOT_TOKEN not set", authNote });
+    return Response.json({ ok: false, skipped: "DISCORD_BOT_TOKEN not set" });
   }
   if (!process.env.ANTHROPIC_API_KEY) {
-    return Response.json({ ok: false, skipped: "ANTHROPIC_API_KEY not set", authNote });
+    return Response.json({ ok: false, skipped: "ANTHROPIC_API_KEY not set" });
   }
 
   // All projects that have a Discord channel wired up.
@@ -52,7 +52,7 @@ export async function GET(req: Request) {
 
   if (error) {
     return Response.json(
-      { ok: false, error: `Failed to load projects: ${error.message}`, authNote },
+      { ok: false, error: `Failed to load projects: ${error.message}` },
       { status: 500 }
     );
   }
@@ -118,6 +118,5 @@ export async function GET(req: Request) {
     processed: projects.length,
     succeeded,
     failed,
-    authNote,
   });
 }

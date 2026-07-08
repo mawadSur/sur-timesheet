@@ -66,15 +66,21 @@ export async function fetchRescueTimeDay(day: string): Promise<RtDay> {
 
 export type Rule = { keyword: string; project_id: string; project_name: string };
 
-// Attribute each row to the first rule whose keyword appears in its window title
-// or activity (case-insensitive). Returns matched seconds per project + the
-// unmatched remainder so nothing is silently dropped.
+// Attribute each row to the most-specific rule whose keyword appears in its
+// window title or activity (case-insensitive). "Most specific" = longest
+// keyword, so 'acme-prod' beats 'acme' regardless of how the DB returned the
+// rules. Returns matched seconds per project + the unmatched remainder so
+// nothing is silently dropped.
 export function bucketByRules(rows: RtRow[], rules: Rule[]) {
+  // Sort a copy longest-keyword-first so the first match is the most specific.
+  const ordered = rules
+    .filter((ru) => ru.keyword)
+    .sort((a, b) => b.keyword.length - a.keyword.length);
   const perProject = new Map<string, { project_id: string; project_name: string; seconds: number }>();
   let matchedSeconds = 0;
   for (const row of rows) {
     const hay = `${row.document} ${row.activity}`.toLowerCase();
-    const rule = rules.find((ru) => ru.keyword && hay.includes(ru.keyword.toLowerCase()));
+    const rule = ordered.find((ru) => hay.includes(ru.keyword.toLowerCase()));
     if (!rule) continue;
     matchedSeconds += row.seconds;
     const p =

@@ -2,28 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { requireAdmin } from "@/lib/auth";
 import { encryptSecret, decryptSecret } from "@/lib/crypto";
 import { logAudit } from "@/lib/audit";
 
-// ── Auth helper ──────────────────────────────────────────────────────────────
-async function requireAdmin() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not signed in.");
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-  if (profile?.role !== "admin") throw new Error("Admins only.");
-  return supabase;
-}
-
 // ── Admin: create a credential ─────────────────────────────────────────────────
 export async function addCredential(formData: FormData) {
-  const supabase = await requireAdmin();
+  const { supabase } = await requireAdmin();
   const project_id = String(formData.get("project_id") || "");
   const label = String(formData.get("label") || "").trim();
   const username = String(formData.get("username") || "").trim();
@@ -48,7 +33,7 @@ export async function addCredential(formData: FormData) {
 
 // ── Admin: update a credential ──────────────────────────────────────────────────
 export async function updateCredential(formData: FormData) {
-  const supabase = await requireAdmin();
+  const { supabase } = await requireAdmin();
   const id = String(formData.get("id") || "");
   if (!id) return;
 
@@ -76,7 +61,7 @@ export async function updateCredential(formData: FormData) {
 
 // ── Admin: delete a credential ──────────────────────────────────────────────────
 export async function deleteCredential(formData: FormData) {
-  const supabase = await requireAdmin();
+  const { supabase } = await requireAdmin();
   const id = String(formData.get("id") || "");
   if (!id) return;
 

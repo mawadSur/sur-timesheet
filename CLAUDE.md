@@ -15,7 +15,8 @@ product. Live at **https://sur-timesheet.vercel.app** (Vercel project
 - **Supabase**: Postgres + Google OAuth, accessed via **`@supabase/ssr`**
   (cookie-based sessions). No ORM — queries go straight through the Supabase JS
   client, with **Row Level Security** doing the authorization.
-- **Vitest** for unit tests (currently crypto only).
+- **Vitest** for unit tests (crypto, books, csv, dates, rescuetime, `requireAdmin`;
+  plus env-gated RLS smoke tests).
 - **Plain CSS** in `app/globals.css` (no Tailwind/CSS-in-JS).
 - Deployed on **Vercel**; auto-deploys on push to `main`.
 - Path alias `@/*` maps to the repo root (see `tsconfig.json`).
@@ -52,13 +53,34 @@ product. Live at **https://sur-timesheet.vercel.app** (Vercel project
 - `middleware.ts` — wires `updateSession` into Next middleware (runs on all
   non-static routes).
 - `config/timesheet.ts` — `BRAND` (name + tagline) only; people/projects live in DB.
+- `lib/auth.ts` — shared `requireAdmin()` (loads the user, checks `role = 'admin'`,
+  returns `{ supabase, user }`); every admin server action imports this now.
+- `lib/supabase/admin.ts` — `createAdminClient()`: tightly-scoped, server-only
+  service-role client (returns `null` when `SUPABASE_SERVICE_ROLE_KEY` is unset).
+- `lib/books.ts` — billing/invoice math: month windows, per-line money, billable
+  invoice-line aggregation (integer cents, half-up rounding).
+- `lib/csv.ts` — CSV cell escaping / row building for exports.
+- `lib/dates.ts` — pure date helpers (`isEnded`, `projectPhase`) for project phase
+  (upcoming / active / ended), timezone-safe.
+- `lib/tailscale.ts` — `grantTailscaleAccess` / `revokeTailscaleAccess`
+  (feature-gated on `TAILSCALE_API_KEY` + `TAILSCALE_TAILNET`; no-op when unset).
+- `lib/discord.ts` — Discord status reads + `grant/revokeDiscordChannelAccess`
+  (feature-gated on `DISCORD_BOT_TOKEN`; no-op when unset).
+- `app/feedback-actions.ts` — continuous-feedback server actions
+  (`addFeedback`, `deleteFeedback`, `getProjectFeedback`).
+- `app/invoice-actions.ts` — invoice lifecycle server actions (draft / send / mark
+  paid / void / regenerate), AR-aware partial-payment handling.
+- `app/rescuetime-actions.ts` — `logRescueTimeHours` bridge (buckets tracked time
+  into project timesheets, with a per-(user, project, day) double-log guard).
+- `app/api/cron/discord-status/route.ts` — cron endpoint (fail-closed on
+  `CRON_SECRET`) that summarizes Discord activity via Claude.
+- `scripts/rotate-creds-key.mjs` — `CREDS_ENCRYPTION_KEY` rotation script
+  (decrypt-with-old / re-encrypt-with-new; two-pass, aborts before any partial write).
 - `supabase/schema.sql` — full data model, RLS policies, allowlist trigger, seed.
-- `tests/crypto.test.ts` + `vitest.config.ts` — crypto round-trip / tamper tests.
-
-> Note (current state): `AdminCredentials`, `CredentialsPanel`, and
-> `UserAccessControls` and the `/admin/audit` link are not yet wired into
-> `app/admin/page.tsx`. The Phase 2 server actions, schema, and components exist;
-> surfacing them in the admin UI is still pending (see `TODOS.md`).
+- `tests/*.test.ts` + `vitest.config.ts` — unit tests (crypto, books, csv, dates,
+  rescuetime, `requireAdmin`; plus env-gated RLS smoke tests).
+- `docs/CREDS_ROTATION.md` — vault key-rotation runbook.
+- `docs/BACKUPS.md` — database backup / retention / restore policy.
 
 ## Security model: auth + allowlist + RLS
 
@@ -102,13 +124,20 @@ product. Live at **https://sur-timesheet.vercel.app** (Vercel project
 
 | Var | Purpose |
 | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL (public, client + server). |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key (public; RLS is the real guard). |
-| `CREDS_ENCRYPTION_KEY` | 32-byte key (64 hex chars, or base64) for AES-256-GCM vault encryption. **Server-only secret.** |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL (public, client + server). **Required.** |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key (public; RLS is the real guard). **Required.** |
+| `CREDS_ENCRYPTION_KEY` | 32-byte key (64 hex chars, or base64) for AES-256-GCM vault encryption. **Server-only secret. Required for the vault.** |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only service-role key for `createAdminClient()` (admin-API paths: offboarding hard-delete, Discord-status cron, Tailscale/Discord provisioning). Absent ⇒ those paths no-op. **Never expose to the client.** |
+| `CRON_SECRET` | Bearer secret Vercel Cron sends to `/api/cron/*`. The discord-status route is **fail-closed**: unset ⇒ every cron call returns 401. Required to run the cron. |
+| `DISCORD_BOT_TOKEN` | Discord bot token for status reads + channel-access grant/revoke. **Optional / feature-gated** — unset ⇒ Discord integration no-ops. |
+| `ANTHROPIC_API_KEY` | Claude API key used by the discord-status cron to summarize activity. **Optional / feature-gated** — unset ⇒ summarization is skipped. |
+| `TAILSCALE_API_KEY` | Tailscale API key for auto-invite / ACL provisioning. **Optional / feature-gated** — needs `TAILSCALE_TAILNET` too; either unset ⇒ Tailscale integration no-ops. |
+| `TAILSCALE_TAILNET` | Tailscale tailnet name (e.g. `example.com`). Pairs with `TAILSCALE_API_KEY`. **Optional / feature-gated.** |
 
-Set all three on **Vercel** (all environments) and in local **`.env.local`**.
-`.env*.local` and `.env` are gitignored — never commit them. Tests inject a fixed
-deterministic key via `vitest.config.ts`.
+Set the **required** vars on **Vercel** (all environments) and in local
+**`.env.local`**; add the optional/feature-gated ones only when you turn that
+integration on. `.env*.local` and `.env` are gitignored — never commit them.
+Tests inject a fixed deterministic key via `vitest.config.ts`.
 
 ## Local dev & deploy
 
@@ -137,10 +166,15 @@ Google OAuth setup is in `README.md`.
   `.inline-form` / `.stack-form` / `.row-form` (forms), `.badge` / `.badge-ok` /
   `.count-pill` (status pills), `.alert` / `.alert-error` (messages), `.auth-card`
   / `.google-btn` (login). CSS variables (colors, radius, shadow) are in `:root`.
-- **RLS-first.** Authorize through RLS + the allowlist trigger. There is no
-  service-role client in the codebase, and adding one would bypass RLS — don't,
-  unless a task genuinely requires admin-API access (e.g. hard-deleting an auth
-  user) and even then scope it tightly to the server.
+- **RLS-first.** Authorize through RLS + the allowlist trigger by default. There
+  **is** a service-role client (`lib/supabase/admin.ts`, `createAdminClient()`),
+  but it is **tightly scoped and server-only** — it exists solely for the handful
+  of paths that genuinely need admin-API access that RLS can't express: hard-
+  deleting an auth user on offboarding, the Discord-status cron, and Tailscale/
+  Discord provisioning. It returns `null` when `SUPABASE_SERVICE_ROLE_KEY` is
+  unset (defensive no-op). Do **not** reach for it in ordinary reads/mutations —
+  those still go through the anon client + RLS. Never expose the service-role key
+  to the client.
 - The data model lives in the DB and is managed from `/admin` — adding people /
   projects / assignments needs no code change or redeploy.
 

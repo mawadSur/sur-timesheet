@@ -8,6 +8,11 @@ import {
   deleteTimeOff,
   refreshDiscordStatus,
 } from "@/app/project-actions";
+import {
+  addFeedback,
+  deleteFeedback,
+  getProjectFeedback,
+} from "@/app/feedback-actions";
 import AdminCredentials from "@/components/AdminCredentials";
 
 const STATUSES = ["Prospective", "Active", "On Hold", "Completed", "Closed"];
@@ -74,7 +79,7 @@ export default async function ProjectDetail({
 
   const [{ data: project }, { data: assignments }, { data: timeOff }] = await Promise.all([
     supabase.from("projects").select("*").eq("id", id).single(),
-    supabase.from("assignments").select("id, profiles(full_name, email)").eq("project_id", id),
+    supabase.from("assignments").select("id, profiles(id, full_name, email)").eq("project_id", id),
     supabase.from("time_off").select("*").eq("project_id", id).order("start_date"),
   ]);
 
@@ -99,6 +104,16 @@ export default async function ProjectDetail({
   const days = (timeOff ?? []) as any[];
   const personName = (n: { full_name: string | null; email: string } | null) =>
     n?.full_name || n?.email || "—";
+
+  // Continuous feedback. The feedback table may not exist until its migration is
+  // applied, so tolerate a read failure and fall back to an empty list rather than
+  // crashing the whole project page.
+  let feedback: any[] = [];
+  try {
+    feedback = ((await getProjectFeedback(id)) ?? []) as any[];
+  } catch {
+    feedback = [];
+  }
 
   return (
     <>
@@ -239,12 +254,84 @@ export default async function ProjectDetail({
           </form>
         </section>
 
+        {/* ── Feedback ──────────────────────────────────────────────── */}
+        <section className="card">
+          <h2 className="card-title">Feedback</h2>
+          <p className="intro">
+            Continuous notes on how the project&mdash;and the people on it&mdash;are doing.
+          </p>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>From</th>
+                <th>About</th>
+                <th>Note</th>
+                <th>When</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {feedback.map((f) => (
+                <tr key={f.id}>
+                  <td>{f.author_name || "—"}</td>
+                  <td>{f.subject_name || "—"}</td>
+                  <td>{f.body}</td>
+                  <td className="muted-cell">
+                    {f.created_at ? new Date(f.created_at).toLocaleDateString() : "—"}
+                  </td>
+                  <td className="right">
+                    <form action={deleteFeedback.bind(null, f.id)}>
+                      <button type="submit" className="link-btn">
+                        Remove
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+              {feedback.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="muted-cell">
+                    No feedback yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          <form action={addFeedback} className="stack-form" style={{ marginTop: 12 }}>
+            <input type="hidden" name="project_id" value={project.id} />
+            <div className="field-row">
+              <div className="field">
+                <label>About (optional)</label>
+                <select name="subject_profile_id" defaultValue="">
+                  <option value="">— Whole project —</option>
+                  {people.map(
+                    (a) =>
+                      a.profiles?.id && (
+                        <option key={a.id} value={a.profiles.id}>
+                          {personName(a.profiles)}
+                        </option>
+                      )
+                  )}
+                </select>
+              </div>
+            </div>
+            <div className="field">
+              <label>Note</label>
+              <input name="body" placeholder="What's going well or needs attention" required />
+            </div>
+            <button type="submit" className="btn">
+              Add feedback
+            </button>
+          </form>
+        </section>
+
         {/* ── Details / edit ────────────────────────────────────────── */}
         <section className="card">
           <h2 className="card-title">Details</h2>
           <p className="intro">
             Manager: {project.manager_name || "—"} · IT support: {project.it_support_phone || "—"} · Recruiter:{" "}
-            {project.recruiter_email || "—"}
+            {project.recruiter_email || "—"} · Tailscale: {project.tailscale_tag || "—"}
           </p>
 
           <form action={updateProject} className="stack-form">
@@ -288,6 +375,16 @@ export default async function ProjectDetail({
               <div className="field">
                 <label>Discord channel ID</label>
                 <input name="discord_channel_id" defaultValue={project.discord_channel_id || ""} />
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>Tailscale tag</label>
+                <input
+                  name="tailscale_tag"
+                  defaultValue={project.tailscale_tag || ""}
+                  placeholder="tag:acme"
+                />
               </div>
             </div>
             <div className="field-row">

@@ -7,16 +7,32 @@ import {
   setRole,
   createProject,
   deleteProject,
-  assignProject,
-  unassignProject,
   setProfileName,
-  setAssignmentRate,
   signOut,
 } from "@/app/actions";
 import AdminCredentials from "@/components/AdminCredentials";
 import UserAccessControls from "@/components/UserAccessControls";
+import AssignPersonForm from "@/components/AssignPersonForm";
+import AssignmentRateForm from "@/components/AssignmentRateForm";
+import UnassignButton from "@/components/UnassignButton";
+import { projectPhase } from "@/lib/dates";
 
 type Named = { full_name: string | null; email: string } | null;
+
+// Auto-computed lifecycle badge from the date window (separate from the manual
+// status field). Uses the shared .badge classes.
+function PhaseBadge({
+  starts_on,
+  ends_on,
+}: {
+  starts_on: string | null;
+  ends_on: string | null;
+}) {
+  const phase = projectPhase(starts_on, ends_on);
+  if (phase === "ended") return <span className="badge">Ended</span>;
+  if (phase === "upcoming") return <span className="badge">Upcoming</span>;
+  return <span className="badge badge-ok">Active</span>;
+}
 
 export default async function Admin() {
   const supabase = await createClient();
@@ -171,7 +187,7 @@ export default async function Admin() {
                   </td>
                   <td className="right">
                     <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", alignItems: "center" }}>
-                      <UserAccessControls email={a.email} isActive={a.is_active} />
+                      <UserAccessControls email={a.email} isActive={a.is_active} profileId={prof?.id ?? null} />
                       <form action={removeAllowedEmail}>
                         <input type="hidden" name="email" value={a.email} />
                         <button type="submit" className="link-btn">
@@ -243,7 +259,10 @@ export default async function Admin() {
                     <Link href={`/admin/projects/${p.id}`}>{p.name}</Link>
                   </td>
                   <td className="muted-cell">
-                    {p.starts_on || "—"} → {p.ends_on || "—"}
+                    <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      {p.starts_on || "—"} → {p.ends_on || "—"}
+                      <PhaseBadge starts_on={p.starts_on} ends_on={p.ends_on} />
+                    </span>
                   </td>
                   <td className="muted-cell">{p.vm_host || "—"}</td>
                   <td className="right">
@@ -281,31 +300,7 @@ export default async function Admin() {
             earns) per assignment &mdash; these are admin-only and drive the{" "}
             <Link href="/admin/books">Books</Link>.
           </p>
-          <form action={assignProject} className="inline-form">
-            <select name="user_id" required defaultValue="">
-              <option value="" disabled>
-                Select person…
-              </option>
-              {(profiles ?? []).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.full_name ? `${p.full_name} (${p.email})` : p.email}
-                </option>
-              ))}
-            </select>
-            <select name="project_id" required defaultValue="">
-              <option value="" disabled>
-                Select project…
-              </option>
-              {(projects ?? []).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <button type="submit" className="btn">
-              Assign
-            </button>
-          </form>
+          <AssignPersonForm people={profiles ?? []} projects={projects ?? []} />
 
           <table className="tbl">
             <thead>
@@ -322,48 +317,22 @@ export default async function Admin() {
                   <td>{name(a.profiles)}</td>
                   <td>{a.projects?.name ?? "—"}</td>
                   <td>
-                    <form action={setAssignmentRate} className="row-form">
-                      <input type="hidden" name="assignment_id" value={a.id} />
-                      <label style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        Bill
-                        <input
-                          name="bill_rate"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          max="100000"
-                          placeholder="bill"
-                          title="Client bill rate per hour"
-                          defaultValue={rateByAssignment.get(a.id)?.bill_rate ?? ""}
-                          style={{ maxWidth: 72 }}
-                        />
-                      </label>
-                      <label style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        Pay
-                        <input
-                          name="pay_rate"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          max="100000"
-                          placeholder="pay"
-                          title="Consultant pay rate per hour"
-                          defaultValue={rateByAssignment.get(a.id)?.pay_rate ?? ""}
-                          style={{ maxWidth: 72 }}
-                        />
-                      </label>
-                      <button type="submit" className="btn-sm">
-                        Save
-                      </button>
-                    </form>
+                    <AssignmentRateForm
+                      assignmentId={a.id}
+                      billRate={
+                        rateByAssignment.get(a.id)?.bill_rate == null
+                          ? null
+                          : Number(rateByAssignment.get(a.id)?.bill_rate)
+                      }
+                      payRate={
+                        rateByAssignment.get(a.id)?.pay_rate == null
+                          ? null
+                          : Number(rateByAssignment.get(a.id)?.pay_rate)
+                      }
+                    />
                   </td>
                   <td className="right">
-                    <form action={unassignProject}>
-                      <input type="hidden" name="id" value={a.id} />
-                      <button type="submit" className="link-btn">
-                        Unassign
-                      </button>
-                    </form>
+                    <UnassignButton assignmentId={a.id} />
                   </td>
                 </tr>
               ))}

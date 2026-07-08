@@ -5,9 +5,16 @@ import { signOut } from "@/app/actions";
 import { addRescueTimeRule, deleteRescueTimeRule, logRescueTimeHours } from "@/app/rescuetime-actions";
 import { fetchRescueTimeDay, bucketByRules, secToHours, secToHm, type Rule } from "@/lib/rescuetime";
 
-export default async function RescueTime({ searchParams }: { searchParams: Promise<{ day?: string }> }) {
+export default async function RescueTime({
+  searchParams,
+}: {
+  searchParams: Promise<{ day?: string; logged?: string; skipped?: string }>;
+}) {
   const sp = await searchParams;
   const supabase = await createClient();
+
+  const loggedCount = sp.logged ? Number(sp.logged) : 0;
+  const skippedDesc = typeof sp.skipped === "string" ? sp.skipped : "";
 
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
@@ -53,6 +60,23 @@ export default async function RescueTime({ searchParams }: { searchParams: Promi
       </header>
 
       <main className="page admin">
+        {/* ── Log result notice (post-redirect) ─────────────────────── */}
+        {(loggedCount > 0 || skippedDesc) && (
+          <section className="card" style={{ borderLeft: `4px solid ${skippedDesc ? "#f79009" : "#12b76a"}` }}>
+            {loggedCount > 0 && (
+              <p className="intro" style={{ margin: skippedDesc ? "0 0 6px" : 0 }}>
+                ✅ Logged {loggedCount} {loggedCount === 1 ? "entry" : "entries"} to your timesheet for {day}.
+              </p>
+            )}
+            {skippedDesc && (
+              <p className="intro" style={{ margin: 0 }}>
+                ⚠️ Already logged for {skippedDesc} on {day} — skipped to avoid double-counting.
+                Adjust on your timesheet if the hours changed.
+              </p>
+            )}
+          </section>
+        )}
+
         {/* ── Not configured ───────────────────────────────────────── */}
         {!rt.ok && rt.error === "no-key" && (
           <section className="card">
