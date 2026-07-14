@@ -3,6 +3,8 @@ import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/actions";
 import { projectPhase } from "@/lib/dates";
+import { stageStyle } from "@/lib/crm";
+import { usdCents } from "@/lib/books";
 
 // Inline-style colors for each status value.
 function statusStyle(status: string | null): React.CSSProperties {
@@ -35,7 +37,7 @@ export default async function Dashboard() {
 
   const { data: projects } = await supabase
     .from("projects")
-    .select("id, name, status, pay_type, starts_on, ends_on, manager_name")
+    .select("id, name, status, pay_type, starts_on, ends_on, manager_name, pipeline_stage, estimated_value_cents")
     .order("name");
 
   const list = (projects ?? []) as any[];
@@ -52,6 +54,9 @@ export default async function Dashboard() {
           <nav className="topnav">
             <Link className="navlink" href="/admin">
               Admin
+            </Link>
+            <Link className="navlink" href="/admin/crm">
+              CRM
             </Link>
             <Link className="navlink" href="/admin/books">
               Books

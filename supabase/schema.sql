@@ -442,3 +442,54 @@ create policy feedback_admin on public.feedback
 drop policy if exists feedback_subject_select on public.feedback;
 create policy feedback_subject_select on public.feedback
   for select to authenticated using (subject_profile_id = auth.uid());
+
+-- ============================================================================
+--  PHASE 9 — lightweight CRM (pipeline) + per-project expense ledger
+--  Idempotent. Additive. Admin-only money; employee flows are untouched.
+--
+--  CRM re-uses the existing `projects` model rather than a separate app: an
+--  incoming opportunity is just a project with a `pipeline_stage` set. When it's
+--  won it keeps flowing through the same assignment / timesheet / books lifecycle.
+--  The operational `status` (Active / On Hold / …) stays separate from the sales
+--  `pipeline_stage` (Lead / Qualified / …) so a project can be both.
+-- ============================================================================
+
+-- CRM fields on projects. All nullable + additive; a null pipeline_stage means
+-- "not a tracked opportunity" (a normal project). Deal value is integer cents to
+-- match the rest of the money layer (invoices, rates).
+alter table public.projects add column if not exists pipeline_stage        text;
+alter table public.projects add column if not exists contact_name          text;
+alter table public.projects add column if not exists contact_email         text;
+alter table public.projects add column if not exists source                text;   -- where the lead came from
+alter table public.projects add column if not exists next_step             text;   -- next action to move it forward
+alter table public.projects add column if not exists next_step_on          date;   -- when that next action is due
+alter table public.projects add column if not exists estimated_value_cents bigint; -- deal size (integer cents)
+
+-- Constrain pipeline_stage to the known set (nullable). Drop + re-add so it's
+-- idempotent, mirroring the role-check pattern above.
+alter table public.projects drop constraint if exists projects_pipeline_stage_check;
+alter table public.projects add  constraint projects_pipeline_stage_check
+  check (pipeline_stage is null or pipeline_stage in ('Lead','Qualified','Proposal','Won','Lost'));
+
+-- Per-project expense ledger. Admin-only, like invoices / assignment_rates —
+-- cost/money lives only where is_admin() can reach it. amount_cents is a
+-- non-negative integer (cents) to match the money layer.
+create table if not exists public.expenses (
+  id           uuid primary key default gen_random_uuid(),
+  project_id   uuid not null references public.projects(id) on delete cascade,
+  spent_on     date not null,
+  amount_cents bigint not null check (amount_cents >= 0),
+  category     text,
+  vendor       text,
+  description  text,
+  created_by   uuid references public.profiles(id) on delete set null,
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists expenses_project_spent_idx
+  on public.expenses (project_id, spent_on desc);
+
+alter table public.expenses enable row level security;
+drop policy if exists expenses_admin on public.expenses;
+create policy expenses_admin on public.expenses
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());

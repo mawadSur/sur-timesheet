@@ -123,6 +123,23 @@ export function billableInvoiceLines(
   return [...byUser.values()].sort((a, b) => b.amount_cents - a.amount_cents);
 }
 
+// Parse a user-entered dollar amount into non-negative integer cents (half-up).
+// Blank / invalid / negative / absurd input returns null so callers can treat it
+// as "leave unset" rather than silently writing a garbage value. Tolerates "$"
+// and thousands separators ("$1,250.50" -> 125050).
+export function dollarsToCents(input: FormDataEntryValue | string | null | undefined): number | null {
+  const s = String(input ?? "").trim().replace(/[$,\s]/g, "");
+  if (s === "") return null;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n < 0 || n > 1_000_000_000) return null;
+  return Math.round(n * 100);
+}
+
+// Sum an expense ledger's amount_cents (integer cents, no float drift).
+export function sumExpenseCents(rows: { amount_cents?: number | string | null }[] | null | undefined): number {
+  return (rows ?? []).reduce((s, r) => s + (Number(r.amount_cents) || 0), 0);
+}
+
 // Format integer cents as USD; sign sits outside the symbol ("-$1,234.00").
 export function usdCents(cents: number): string {
   return (

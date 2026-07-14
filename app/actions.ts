@@ -7,6 +7,8 @@ import { requireAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { grantTailscaleAccess, revokeTailscaleAccess } from "@/lib/tailscale";
 import { grantDiscordChannelAccess, revokeDiscordChannelAccess } from "@/lib/discord";
+import { dollarsToCents } from "@/lib/books";
+import { asPipelineStage } from "@/lib/crm";
 import type { RateState, AssignState, UnassignState } from "@/app/assignment-state";
 
 // Valid account roles. "staff" is a restricted support type (logs hours, blocked
@@ -121,15 +123,23 @@ export async function createProject(formData: FormData) {
   const { supabase } = await requireAdmin();
   const name = String(formData.get("name") || "").trim();
   if (!name) return;
+  // Optional CRM fields let an incoming opportunity be captured at creation
+  // (a project with a pipeline_stage set). All null-safe / additive.
   await supabase.from("projects").insert({
     name,
     description: String(formData.get("description") || "").trim() || null,
     starts_on: String(formData.get("starts_on") || "") || null,
     ends_on: String(formData.get("ends_on") || "") || null,
     vm_host: String(formData.get("vm_host") || "").trim() || null,
+    pipeline_stage: asPipelineStage(String(formData.get("pipeline_stage") || "") || undefined),
+    contact_name: String(formData.get("contact_name") || "").trim().slice(0, 120) || null,
+    source: String(formData.get("source") || "").trim().slice(0, 120) || null,
+    estimated_value_cents: dollarsToCents(formData.get("estimated_value")),
   });
   await logAudit("create_project", { target: name });
   revalidatePath("/admin");
+  revalidatePath("/admin/crm");
+  revalidatePath("/admin/dashboard");
 }
 
 export async function deleteProject(formData: FormData) {

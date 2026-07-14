@@ -83,6 +83,9 @@ export default async function Admin() {
             <Link className="navlink" href="/admin/dashboard">
               Dashboard
             </Link>
+            <Link className="navlink" href="/admin/crm">
+              CRM
+            </Link>
             <Link className="navlink" href="/admin/books">
               Books
             </Link>
@@ -237,6 +240,33 @@ export default async function Admin() {
             <div className="field">
               <label>Description</label>
               <input name="description" placeholder="Optional" />
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>Pipeline stage (optional)</label>
+                <select name="pipeline_stage" defaultValue="">
+                  <option value="">— Not an opportunity —</option>
+                  <option value="Lead">Lead</option>
+                  <option value="Qualified">Qualified</option>
+                  <option value="Proposal">Proposal</option>
+                  <option value="Won">Won</option>
+                  <option value="Lost">Lost</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>Est. value ($)</label>
+                <input name="estimated_value" type="number" step="0.01" min="0" placeholder="e.g. 25000" />
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>Contact (optional)</label>
+                <input name="contact_name" placeholder="Point of contact" />
+              </div>
+              <div className="field">
+                <label>Source (optional)</label>
+                <input name="source" placeholder="Referral, inbound, …" />
+              </div>
             </div>
             <button type="submit" className="btn">
               Add project

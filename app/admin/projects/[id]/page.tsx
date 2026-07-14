@@ -13,6 +13,10 @@ import {
   deleteFeedback,
   getProjectFeedback,
 } from "@/app/feedback-actions";
+import { addExpense, deleteExpense, getProjectExpenses } from "@/app/expense-actions";
+import { updateOpportunity } from "@/app/crm-actions";
+import { PIPELINE_STAGES, stageStyle } from "@/lib/crm";
+import { usdCents } from "@/lib/books";
 import AdminCredentials from "@/components/AdminCredentials";
 
 const STATUSES = ["Prospective", "Active", "On Hold", "Completed", "Closed"];
@@ -102,6 +106,7 @@ export default async function ProjectDetail({
 
   const people = (assignments ?? []) as any[];
   const days = (timeOff ?? []) as any[];
+  const todayIso = new Date().toISOString().slice(0, 10);
   const personName = (n: { full_name: string | null; email: string } | null) =>
     n?.full_name || n?.email || "—";
 
@@ -114,6 +119,16 @@ export default async function ProjectDetail({
   } catch {
     feedback = [];
   }
+
+  // Expense ledger — same tolerance: the expenses table may not exist until its
+  // migration is applied, so fall back to an empty list rather than crashing.
+  let expenses: any[] = [];
+  try {
+    expenses = ((await getProjectExpenses(id)) ?? []) as any[];
+  } catch {
+    expenses = [];
+  }
+  const expensesTotal = expenses.reduce((s, e) => s + (Number(e.amount_cents) || 0), 0);
 
   return (
     <>
@@ -139,6 +154,87 @@ export default async function ProjectDetail({
             </span>
           </div>
           {project.description && <p className="intro" style={{ marginTop: 10 }}>{project.description}</p>}
+        </section>
+
+        {/* ── Pipeline / CRM ────────────────────────────────────────── */}
+        <section className="card">
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <h2 className="card-title" style={{ margin: 0 }}>Pipeline / CRM</h2>
+            {project.pipeline_stage && (
+              <span style={{ ...badgeBase, ...stageStyle(project.pipeline_stage) }}>{project.pipeline_stage}</span>
+            )}
+            {project.estimated_value_cents != null && (
+              <span className="count-pill">{usdCents(Number(project.estimated_value_cents))} est.</span>
+            )}
+          </div>
+          <p className="intro">
+            Track this as an incoming opportunity. Stage, contact, source, next step and value
+            &mdash; a useful minimum. Leave the stage blank if it isn&apos;t a tracked deal.
+          </p>
+          {project.next_step && (
+            <p style={{ margin: "4px 0 8px" }}>
+              <strong>Next step:</strong> {project.next_step}
+              {project.next_step_on && (
+                <span
+                  className="muted-cell"
+                  style={{ marginLeft: 8, color: project.next_step_on < todayIso ? "var(--red)" : undefined }}
+                >
+                  (due {project.next_step_on}{project.next_step_on < todayIso ? " — overdue" : ""})
+                </span>
+              )}
+            </p>
+          )}
+
+          <form action={updateOpportunity} className="stack-form">
+            <input type="hidden" name="id" value={project.id} />
+            <div className="field-row">
+              <div className="field">
+                <label>Pipeline stage</label>
+                <select name="pipeline_stage" defaultValue={project.pipeline_stage || ""}>
+                  <option value="">— Not an opportunity —</option>
+                  {PIPELINE_STAGES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>Estimated value ($)</label>
+                <input
+                  name="estimated_value"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  defaultValue={project.estimated_value_cents != null ? Number(project.estimated_value_cents) / 100 : ""}
+                  placeholder="e.g. 25000"
+                />
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>Contact name</label>
+                <input name="contact_name" defaultValue={project.contact_name || ""} placeholder="Point of contact" />
+              </div>
+              <div className="field">
+                <label>Contact email</label>
+                <input name="contact_email" type="email" defaultValue={project.contact_email || ""} />
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>Source</label>
+                <input name="source" defaultValue={project.source || ""} placeholder="Referral, inbound, …" />
+              </div>
+              <div className="field">
+                <label>Next step due</label>
+                <input name="next_step_on" type="date" defaultValue={project.next_step_on || ""} />
+              </div>
+            </div>
+            <div className="field">
+              <label>Next step</label>
+              <input name="next_step" defaultValue={project.next_step || ""} placeholder="e.g. Send proposal, follow up call" />
+            </div>
+            <button type="submit" className="btn">Save opportunity</button>
+          </form>
         </section>
 
         {/* ── Discord status ────────────────────────────────────────── */}
@@ -251,6 +347,82 @@ export default async function ProjectDetail({
             <button type="submit" className="btn">
               Add days off
             </button>
+          </form>
+        </section>
+
+        {/* ── Expenses ──────────────────────────────────────────────── */}
+        <section className="card">
+          <h2 className="card-title">
+            Expenses{" "}
+            <span className="count-pill">{usdCents(expensesTotal)} total</span>
+          </h2>
+          <p className="intro">
+            Project costs &mdash; hardware, licenses, travel, subcontractors. These roll into
+            the <Link href="/admin/books">Books</Link> net for the month they were spent. Admin-only.
+          </p>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Category</th>
+                <th>Vendor</th>
+                <th className="right">Amount</th>
+                <th>Description</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {expenses.map((e) => (
+                <tr key={e.id}>
+                  <td>{e.spent_on}</td>
+                  <td>{e.category || "—"}</td>
+                  <td className="muted-cell">{e.vendor || "—"}</td>
+                  <td className="right">{usdCents(Number(e.amount_cents) || 0)}</td>
+                  <td className="muted-cell">{e.description || "—"}</td>
+                  <td className="right">
+                    <form action={deleteExpense}>
+                      <input type="hidden" name="id" value={e.id} />
+                      <input type="hidden" name="project_id" value={project.id} />
+                      <button type="submit" className="link-btn">Remove</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+              {expenses.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="muted-cell">No expenses recorded.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          <form action={addExpense} className="stack-form" style={{ marginTop: 12 }}>
+            <input type="hidden" name="project_id" value={project.id} />
+            <div className="field-row">
+              <div className="field">
+                <label>Date</label>
+                <input name="spent_on" type="date" defaultValue={todayIso} required />
+              </div>
+              <div className="field">
+                <label>Amount ($)</label>
+                <input name="amount" type="number" step="0.01" min="0" placeholder="e.g. 149.99" required />
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>Category</label>
+                <input name="category" placeholder="Hardware, License, Travel, …" />
+              </div>
+              <div className="field">
+                <label>Vendor</label>
+                <input name="vendor" placeholder="Optional" />
+              </div>
+            </div>
+            <div className="field">
+              <label>Description</label>
+              <input name="description" placeholder="Optional" />
+            </div>
+            <button type="submit" className="btn">Add expense</button>
           </form>
         </section>
 
