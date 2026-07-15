@@ -36,16 +36,23 @@ describe("csvCell", () => {
     expect(csvCell('a,"b"\nc')).toBe('"a,""b""\nc"');
   });
 
-  // Documents CURRENT behavior: csvCell escapes for CSV parsing only — it has NO
-  // spreadsheet formula-injection guard, so a value that starts with = + - @ is
-  // returned verbatim unless it also contains a comma/quote/newline. See the
-  // follow-up note; if a prefix guard is ever added these expectations change.
-  it("does NOT neutralize formula-injection prefixes (no guard today)", () => {
-    expect(csvCell("=1+1")).toBe("=1+1");
-    expect(csvCell("+1")).toBe("+1");
-    expect(csvCell("-1")).toBe("-1");
-    expect(csvCell("@SUM(A1)")).toBe("@SUM(A1)");
-    // A formula that also contains a comma is quoted for CSV reasons only.
-    expect(csvCell("=SUM(A1,A2)")).toBe('"=SUM(A1,A2)"');
+  describe("neutralizes spreadsheet formula-injection prefixes", () => {
+    it("prepends a single quote to a leading = + - @", () => {
+      expect(csvCell("=1+1")).toBe("'=1+1");
+      expect(csvCell("+1")).toBe("'+1");
+      expect(csvCell("-1")).toBe("'-1");
+      expect(csvCell("@SUM(A1)")).toBe("'@SUM(A1)");
+    });
+
+    it("leaves a normal value unchanged", () => {
+      expect(csvCell("hello")).toBe("hello");
+    });
+
+    it("still quotes a value that needs CSV quoting", () => {
+      // Neutralized (leading =) AND contains a comma, so it is also wrapped.
+      expect(csvCell("=SUM(A1,A2)")).toBe('"\'=SUM(A1,A2)"');
+      // Plain value with a comma is quoted but not prefixed.
+      expect(csvCell("a,b")).toBe('"a,b"');
+    });
   });
 });

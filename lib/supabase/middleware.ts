@@ -52,14 +52,15 @@ export async function updateSession(request: NextRequest) {
 
   // Signed-in user on a non-public route → fetch role + active status once.
   if (user && !isPublic) {
-    const { data: profile } = await supabase
+    const { data: profile, error } = await supabase
       .from("profiles")
       .select("role, is_active")
       .eq("id", user.id)
       .single();
 
-    // Revoked → lock out immediately on every request.
-    if (profile?.is_active === false) {
+    // Revoked (or fail-closed on a lookup error/missing profile) → lock out
+    // immediately on every request.
+    if (error || !profile || profile.is_active === false) {
       const url = request.nextUrl.clone();
       url.pathname = "/not-authorized";
       const redirect = NextResponse.redirect(url);

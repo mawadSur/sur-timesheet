@@ -37,7 +37,7 @@ export default async function Dashboard() {
 
   const { data: projects } = await supabase
     .from("projects")
-    .select("id, name, status, pay_type, starts_on, ends_on, manager_name, pipeline_stage, estimated_value_cents")
+    .select("id, name, status, pay_type, starts_on, ends_on, manager_name, project_crm(pipeline_stage, estimated_value_cents)")
     .order("name");
 
   const list = (projects ?? []) as any[];
@@ -91,6 +91,7 @@ export default async function Dashboard() {
             >
               {list.map((p) => {
                 const phase = projectPhase(p.starts_on, p.ends_on);
+                const crm = Array.isArray(p.project_crm) ? p.project_crm[0] : p.project_crm;
                 return (
                 <Link
                   key={p.id}
@@ -122,10 +123,18 @@ export default async function Dashboard() {
                     <span className={phase === "active" ? "badge badge-ok" : "badge"}>
                       {phase === "ended" ? "Ended" : phase === "upcoming" ? "Upcoming" : "Active"}
                     </span>
+                    {crm?.pipeline_stage && (
+                      <span style={{ ...badgeBase, ...stageStyle(crm.pipeline_stage) }}>{crm.pipeline_stage}</span>
+                    )}
                   </div>
                   <div style={{ fontSize: 13, color: "#5b6470" }}>
                     Manager: {p.manager_name || "—"}
                   </div>
+                  {crm?.estimated_value_cents != null && (
+                    <div style={{ fontSize: 13, color: "#5b6470", marginTop: 2 }}>
+                      Rate: {usdCents(Number(crm.estimated_value_cents))}/hr
+                    </div>
+                  )}
                   {p.ends_on && (
                     <div style={{ fontSize: 13, color: "#5b6470", marginTop: 2 }}>
                       Ends: {p.ends_on}

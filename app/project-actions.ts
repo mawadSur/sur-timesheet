@@ -11,19 +11,17 @@ function s(formData: FormData, key: string): string | null {
   return v || null;
 }
 
-const PAY_TYPES = ["C2C", "W2", "1099"];
-
 // ── Edit a project's dashboard metadata ─────────────────────────────────────────
+// Note: employment type (pay_type) is edited from the Pipeline / CRM section
+// (updateOpportunity), so it is deliberately NOT touched here.
 export async function updateProject(formData: FormData) {
   const { supabase } = await requireAdmin();
   const id = String(formData.get("id") || "");
   if (!id) return;
-  const payRaw = s(formData, "pay_type");
   await supabase
     .from("projects")
     .update({
       status: s(formData, "status") || "Active",
-      pay_type: payRaw && PAY_TYPES.includes(payRaw) ? payRaw : null,
       manager_name: s(formData, "manager_name"),
       it_support_phone: s(formData, "it_support_phone"),
       recruiter_email: s(formData, "recruiter_email"),

@@ -81,10 +81,12 @@ export default async function ProjectDetail({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: project }, { data: assignments }, { data: timeOff }] = await Promise.all([
+  const [{ data: project }, { data: assignments }, { data: timeOff }, { data: crmRow }] = await Promise.all([
     supabase.from("projects").select("*").eq("id", id).single(),
     supabase.from("assignments").select("id, profiles(id, full_name, email)").eq("project_id", id),
     supabase.from("time_off").select("*").eq("project_id", id).order("start_date"),
+    // Candidate CRM fields live in the admin-only project_crm table (may be absent).
+    supabase.from("project_crm").select("*").eq("project_id", id).maybeSingle(),
   ]);
 
   if (!project) {
@@ -106,6 +108,7 @@ export default async function ProjectDetail({
 
   const people = (assignments ?? []) as any[];
   const days = (timeOff ?? []) as any[];
+  const crm = (crmRow ?? {}) as any;
   const todayIso = new Date().toISOString().slice(0, 10);
   const personName = (n: { full_name: string | null; email: string } | null) =>
     n?.full_name || n?.email || "—";
@@ -160,26 +163,27 @@ export default async function ProjectDetail({
         <section className="card">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <h2 className="card-title" style={{ margin: 0 }}>Pipeline / CRM</h2>
-            {project.pipeline_stage && (
-              <span style={{ ...badgeBase, ...stageStyle(project.pipeline_stage) }}>{project.pipeline_stage}</span>
+            {crm.pipeline_stage && (
+              <span style={{ ...badgeBase, ...stageStyle(crm.pipeline_stage) }}>{crm.pipeline_stage}</span>
             )}
-            {project.estimated_value_cents != null && (
-              <span className="count-pill">{usdCents(Number(project.estimated_value_cents))} est.</span>
+            {crm.estimated_value_cents != null && (
+              <span className="count-pill">{usdCents(Number(crm.estimated_value_cents))}/hr</span>
             )}
+            {project.pay_type && <span className="count-pill">{project.pay_type}</span>}
           </div>
           <p className="intro">
-            Track this as an incoming opportunity. Stage, contact, source, next step and value
-            &mdash; a useful minimum. Leave the stage blank if it isn&apos;t a tracked deal.
+            Track this as an incoming contractor. Stage, contact, employment type, next step and
+            hourly rate &mdash; a useful minimum. Leave the stage blank if it isn&apos;t a tracked candidate.
           </p>
-          {project.next_step && (
+          {crm.next_step && (
             <p style={{ margin: "4px 0 8px" }}>
-              <strong>Next step:</strong> {project.next_step}
-              {project.next_step_on && (
+              <strong>Next step:</strong> {crm.next_step}
+              {crm.next_step_on && (
                 <span
                   className="muted-cell"
-                  style={{ marginLeft: 8, color: project.next_step_on < todayIso ? "var(--red)" : undefined }}
+                  style={{ marginLeft: 8, color: crm.next_step_on < todayIso ? "var(--red)" : undefined }}
                 >
-                  (due {project.next_step_on}{project.next_step_on < todayIso ? " — overdue" : ""})
+                  (due {crm.next_step_on}{crm.next_step_on < todayIso ? " — overdue" : ""})
                 </span>
               )}
             </p>
@@ -190,50 +194,61 @@ export default async function ProjectDetail({
             <div className="field-row">
               <div className="field">
                 <label>Pipeline stage</label>
-                <select name="pipeline_stage" defaultValue={project.pipeline_stage || ""}>
-                  <option value="">— Not an opportunity —</option>
+                <select name="pipeline_stage" defaultValue={crm.pipeline_stage || ""}>
+                  <option value="">— Not a candidate —</option>
                   {PIPELINE_STAGES.map((s) => (
                     <option key={s} value={s}>{s}</option>
                   ))}
                 </select>
               </div>
               <div className="field">
-                <label>Estimated value ($)</label>
+                <label>Rate ($/hr)</label>
                 <input
                   name="estimated_value"
                   type="number"
                   step="0.01"
                   min="0"
-                  defaultValue={project.estimated_value_cents != null ? Number(project.estimated_value_cents) / 100 : ""}
-                  placeholder="e.g. 25000"
+                  defaultValue={crm.estimated_value_cents != null ? Number(crm.estimated_value_cents) / 100 : ""}
+                  placeholder="e.g. 85"
                 />
               </div>
             </div>
             <div className="field-row">
               <div className="field">
                 <label>Contact name</label>
-                <input name="contact_name" defaultValue={project.contact_name || ""} placeholder="Point of contact" />
+                <input name="contact_name" defaultValue={crm.contact_name || ""} placeholder="Point of contact" />
               </div>
               <div className="field">
                 <label>Contact email</label>
-                <input name="contact_email" type="email" defaultValue={project.contact_email || ""} />
+                <input name="contact_email" type="email" defaultValue={crm.contact_email || ""} placeholder="name@company.com" />
               </div>
             </div>
             <div className="field-row">
               <div className="field">
-                <label>Source</label>
-                <input name="source" defaultValue={project.source || ""} placeholder="Referral, inbound, …" />
+                <label>Contact phone</label>
+                <input name="contact_phone" type="tel" defaultValue={crm.contact_phone || ""} placeholder="+1 555 000 0000" />
               </div>
               <div className="field">
+                <label>Employment type</label>
+                <select name="pay_type" defaultValue={project.pay_type || ""}>
+                  <option value="">—</option>
+                  <option value="W2">W2</option>
+                  <option value="1099">1099</option>
+                  <option value="C2C">C2C</option>
+                </select>
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field">
                 <label>Next step due</label>
-                <input name="next_step_on" type="date" defaultValue={project.next_step_on || ""} />
+                <input name="next_step_on" type="date" defaultValue={crm.next_step_on || ""} />
               </div>
             </div>
             <div className="field">
               <label>Next step</label>
-              <input name="next_step" defaultValue={project.next_step || ""} placeholder="e.g. Send proposal, follow up call" />
+              <input name="next_step" defaultValue={crm.next_step || ""} placeholder="e.g. Send offer letter, schedule background check" />
             </div>
-            <button type="submit" className="btn">Save opportunity</button>
+            <button type="submit" className="btn">Save candidate</button>
           </form>
         </section>
 
@@ -520,36 +535,25 @@ export default async function ProjectDetail({
                 </select>
               </div>
               <div className="field">
-                <label>Pay type</label>
-                <select name="pay_type" defaultValue={project.pay_type || ""}>
-                  <option value="">—</option>
-                  <option value="C2C">C2C</option>
-                  <option value="W2">W2</option>
-                  <option value="1099">1099</option>
-                </select>
-              </div>
-            </div>
-            <div className="field-row">
-              <div className="field">
                 <label>Manager name</label>
                 <input name="manager_name" defaultValue={project.manager_name || ""} />
               </div>
+            </div>
+            <div className="field-row">
               <div className="field">
                 <label>IT support phone</label>
                 <input name="it_support_phone" defaultValue={project.it_support_phone || ""} />
               </div>
-            </div>
-            <div className="field-row">
               <div className="field">
                 <label>Recruiter email</label>
                 <input name="recruiter_email" type="email" defaultValue={project.recruiter_email || ""} />
               </div>
+            </div>
+            <div className="field-row">
               <div className="field">
                 <label>Discord channel ID</label>
                 <input name="discord_channel_id" defaultValue={project.discord_channel_id || ""} />
               </div>
-            </div>
-            <div className="field-row">
               <div className="field">
                 <label>Tailscale tag</label>
                 <input

@@ -5,6 +5,8 @@ import {
   buildRateByPair,
   resolveMonthWindow,
   billableInvoiceLines,
+  dollarsToCents,
+  sumExpenseCents,
 } from "../lib/books";
 
 describe("usdCents", () => {
@@ -179,5 +181,44 @@ describe("billableInvoiceLines", () => {
     }));
     // Each line: 0.1 h × $100 × 100 = 1000c → 3 lines = 3000c
     expect(billableInvoiceLines(rows, rateByPair)[0].amount_cents).toBe(3000);
+  });
+});
+
+describe("dollarsToCents", () => {
+  it("parses plain dollar amounts to integer cents (half-up)", () => {
+    expect(dollarsToCents("149.99")).toBe(14999);
+    expect(dollarsToCents("25000")).toBe(2500000);
+    expect(dollarsToCents("0.005")).toBe(1); // 0.5c rounds half-up to 1c
+  });
+
+  it("tolerates '$' and thousands separators", () => {
+    expect(dollarsToCents("$1,250.50")).toBe(125050);
+    expect(dollarsToCents(" $ 42 ")).toBe(4200);
+  });
+
+  it("returns null for blank / invalid / negative / absurd input", () => {
+    expect(dollarsToCents("")).toBeNull();
+    expect(dollarsToCents("   ")).toBeNull();
+    expect(dollarsToCents(null)).toBeNull();
+    expect(dollarsToCents(undefined)).toBeNull();
+    expect(dollarsToCents("abc")).toBeNull();
+    expect(dollarsToCents("-5")).toBeNull();
+    expect(dollarsToCents("2000000000")).toBeNull(); // > 1e9 ceiling
+  });
+});
+
+describe("sumExpenseCents", () => {
+  it("totals amount_cents as integers with no float drift", () => {
+    expect(sumExpenseCents([{ amount_cents: 14999 }, { amount_cents: 1 }, { amount_cents: 100000 }])).toBe(115000);
+  });
+
+  it("coerces string amounts and skips null/garbage", () => {
+    expect(sumExpenseCents([{ amount_cents: "500" }, { amount_cents: null }, { amount_cents: undefined }])).toBe(500);
+  });
+
+  it("returns 0 for empty / null / undefined", () => {
+    expect(sumExpenseCents([])).toBe(0);
+    expect(sumExpenseCents(null)).toBe(0);
+    expect(sumExpenseCents(undefined)).toBe(0);
   });
 });

@@ -245,17 +245,15 @@ export default async function Admin() {
               <div className="field">
                 <label>Pipeline stage (optional)</label>
                 <select name="pipeline_stage" defaultValue="">
-                  <option value="">— Not an opportunity —</option>
-                  <option value="Lead">Lead</option>
-                  <option value="Qualified">Qualified</option>
-                  <option value="Proposal">Proposal</option>
-                  <option value="Won">Won</option>
-                  <option value="Lost">Lost</option>
+                  <option value="">— Not a candidate —</option>
+                  <option value="Offer">Offer</option>
+                  <option value="Background check">Background check</option>
+                  <option value="Expected start">Expected start</option>
                 </select>
               </div>
               <div className="field">
-                <label>Est. value ($)</label>
-                <input name="estimated_value" type="number" step="0.01" min="0" placeholder="e.g. 25000" />
+                <label>Rate ($/hr)</label>
+                <input name="estimated_value" type="number" step="0.01" min="0" placeholder="e.g. 85" />
               </div>
             </div>
             <div className="field-row">
@@ -264,8 +262,23 @@ export default async function Admin() {
                 <input name="contact_name" placeholder="Point of contact" />
               </div>
               <div className="field">
-                <label>Source (optional)</label>
-                <input name="source" placeholder="Referral, inbound, …" />
+                <label>Contact email (optional)</label>
+                <input name="contact_email" type="email" placeholder="name@company.com" />
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>Contact phone (optional)</label>
+                <input name="contact_phone" type="tel" placeholder="+1 555 000 0000" />
+              </div>
+              <div className="field">
+                <label>Employment type (optional)</label>
+                <select name="pay_type" defaultValue="">
+                  <option value="">—</option>
+                  <option value="W2">W2</option>
+                  <option value="1099">1099</option>
+                  <option value="C2C">C2C</option>
+                </select>
               </div>
             </div>
             <button type="submit" className="btn">

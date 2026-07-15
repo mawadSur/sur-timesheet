@@ -8,7 +8,7 @@ import { logAudit } from "@/lib/audit";
 import { grantTailscaleAccess, revokeTailscaleAccess } from "@/lib/tailscale";
 import { grantDiscordChannelAccess, revokeDiscordChannelAccess } from "@/lib/discord";
 import { dollarsToCents } from "@/lib/books";
-import { asPipelineStage } from "@/lib/crm";
+import { asPipelineStage, asPayType } from "@/lib/crm";
 import type { RateState, AssignState, UnassignState } from "@/app/assignment-state";
 
 // Valid account roles. "staff" is a restricted support type (logs hours, blocked
@@ -90,6 +90,10 @@ export async function removeAllowedEmail(formData: FormData) {
   const { supabase } = await requireAdmin();
   const email = String(formData.get("email") || "").trim().toLowerCase();
   if (!email) return;
+  // Lock out anyone who is already signed in — deleting the allowlist row alone
+  // leaves their profiles.is_active true, so they'd keep their session until it
+  // expires. Flip is_active first, then remove the allowlist entry.
+  await supabase.from("profiles").update({ is_active: false }).eq("email", email);
   await supabase.from("allowed_emails").delete().eq("email", email);
   await logAudit("remove_allowed_email", { target: email });
   revalidatePath("/admin");
@@ -123,19 +127,39 @@ export async function createProject(formData: FormData) {
   const { supabase } = await requireAdmin();
   const name = String(formData.get("name") || "").trim();
   if (!name) return;
-  // Optional CRM fields let an incoming opportunity be captured at creation
-  // (a project with a pipeline_stage set). All null-safe / additive.
-  await supabase.from("projects").insert({
-    name,
-    description: String(formData.get("description") || "").trim() || null,
-    starts_on: String(formData.get("starts_on") || "") || null,
-    ends_on: String(formData.get("ends_on") || "") || null,
-    vm_host: String(formData.get("vm_host") || "").trim() || null,
-    pipeline_stage: asPipelineStage(String(formData.get("pipeline_stage") || "") || undefined),
-    contact_name: String(formData.get("contact_name") || "").trim().slice(0, 120) || null,
-    source: String(formData.get("source") || "").trim().slice(0, 120) || null,
-    estimated_value_cents: dollarsToCents(formData.get("estimated_value")),
-  });
+  const { data: created } = await supabase
+    .from("projects")
+    .insert({
+      name,
+      description: String(formData.get("description") || "").trim() || null,
+      starts_on: String(formData.get("starts_on") || "") || null,
+      ends_on: String(formData.get("ends_on") || "") || null,
+      vm_host: String(formData.get("vm_host") || "").trim() || null,
+      pay_type: asPayType(String(formData.get("pay_type") || "") || undefined),
+    })
+    .select("id")
+    .single();
+
+  // Optional CRM fields let an incoming candidate be captured at creation. They
+  // live in the admin-only project_crm table, never on the employee-readable
+  // projects row. Only write a row when at least one field is set.
+  if (created?.id) {
+    const pipeline_stage = asPipelineStage(String(formData.get("pipeline_stage") || "") || undefined);
+    const contact_name = String(formData.get("contact_name") || "").trim().slice(0, 120) || null;
+    const contact_email = String(formData.get("contact_email") || "").trim().slice(0, 200) || null;
+    const contact_phone = String(formData.get("contact_phone") || "").trim().slice(0, 60) || null;
+    const estimated_value_cents = dollarsToCents(formData.get("estimated_value"));
+    if (pipeline_stage || contact_name || contact_email || contact_phone || estimated_value_cents != null) {
+      await supabase.from("project_crm").insert({
+        project_id: created.id,
+        pipeline_stage,
+        contact_name,
+        contact_email,
+        contact_phone,
+        estimated_value_cents,
+      });
+    }
+  }
   await logAudit("create_project", { target: name });
   revalidatePath("/admin");
   revalidatePath("/admin/crm");

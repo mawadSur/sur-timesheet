@@ -19,6 +19,7 @@ create table if not exists public.profiles (
   email      text not null,
   full_name  text,
   role       text not null default 'employee' check (role in ('employee','admin')),
+  is_active  boolean not null default true,
   created_at timestamptz not null default now()
 );
 
@@ -65,7 +66,22 @@ stable
 set search_path = public
 as $$
   select exists (
-    select 1 from public.profiles where id = auth.uid() and role = 'admin'
+    select 1 from public.profiles where id = auth.uid() and role = 'admin' and coalesce(is_active, true)
+  );
+$$;
+
+-- ── Helper: am I an active (non-revoked) user? ────────────────────────────────
+-- A user with is_active = false gets NO data even with a still-valid JWT; NULL
+-- is treated as active (mirrors the middleware). Gates employee/staff branches.
+create or replace function public.is_active_user()
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.profiles where id = auth.uid() and coalesce(is_active, true)
   );
 $$;
 
@@ -93,10 +109,10 @@ create policy profiles_update_admin on public.profiles
 drop policy if exists projects_select on public.projects;
 create policy projects_select on public.projects
   for select to authenticated using (
-    public.is_admin() or exists (
+    public.is_admin() or (public.is_active_user() and exists (
       select 1 from public.assignments a
       where a.project_id = projects.id and a.user_id = auth.uid()
-    )
+    ))
   );
 drop policy if exists projects_write_admin on public.projects;
 create policy projects_write_admin on public.projects
@@ -105,7 +121,7 @@ create policy projects_write_admin on public.projects
 -- assignments: employees see own; admin manages all
 drop policy if exists assignments_select on public.assignments;
 create policy assignments_select on public.assignments
-  for select to authenticated using (user_id = auth.uid() or public.is_admin());
+  for select to authenticated using (public.is_admin() or (public.is_active_user() and user_id = auth.uid()));
 drop policy if exists assignments_write_admin on public.assignments;
 create policy assignments_write_admin on public.assignments
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
@@ -113,18 +129,18 @@ create policy assignments_write_admin on public.assignments
 -- timesheets: employees see/insert own (only for assigned projects); admin sees all
 drop policy if exists timesheets_select on public.timesheets;
 create policy timesheets_select on public.timesheets
-  for select to authenticated using (user_id = auth.uid() or public.is_admin());
+  for select to authenticated using (public.is_admin() or (public.is_active_user() and user_id = auth.uid()));
 drop policy if exists timesheets_insert on public.timesheets;
 create policy timesheets_insert on public.timesheets
   for insert to authenticated with check (
-    user_id = auth.uid() and exists (
+    user_id = auth.uid() and public.is_active_user() and exists (
       select 1 from public.assignments a
       where a.user_id = auth.uid() and a.project_id = timesheets.project_id
     )
   );
 drop policy if exists timesheets_modify on public.timesheets;
 create policy timesheets_modify on public.timesheets
-  for delete to authenticated using (user_id = auth.uid() or public.is_admin());
+  for delete to authenticated using (public.is_admin() or (public.is_active_user() and user_id = auth.uid()));
 
 -- ── Seed the first admin ──────────────────────────────────────────────────────
 -- IMPORTANT: change this to YOUR Google email before running, if different.
@@ -166,7 +182,7 @@ begin
   insert into public.profiles (id, email, full_name, role)
   values (
     new.id,
-    new.email,
+    lower(new.email),
     coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name'),
     allowed_role
   );
@@ -226,7 +242,7 @@ create policy audit_select_admin on public.audit_log
   for select to authenticated using (public.is_admin());
 drop policy if exists audit_insert on public.audit_log;
 create policy audit_insert on public.audit_log
-  for insert to authenticated with check (auth.uid() is not null);
+  for insert to authenticated with check (actor_id = auth.uid());
 
 -- ============================================================================
 --  PHASE 3 — admin project dashboard: project metadata, time off, Discord status
@@ -259,12 +275,7 @@ create table if not exists public.time_off (
 alter table public.time_off enable row level security;
 drop policy if exists time_off_select on public.time_off;
 create policy time_off_select on public.time_off
-  for select to authenticated using (
-    public.is_admin() or exists (
-      select 1 from public.assignments a
-      where a.project_id = time_off.project_id and a.user_id = auth.uid()
-    )
-  );
+  for select to authenticated using (public.is_admin());
 drop policy if exists time_off_write_admin on public.time_off;
 create policy time_off_write_admin on public.time_off
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
@@ -374,7 +385,7 @@ stable
 set search_path = public
 as $$
   select exists (
-    select 1 from public.profiles where id = auth.uid() and role = 'staff'
+    select 1 from public.profiles where id = auth.uid() and role = 'staff' and coalesce(is_active, true)
   );
 $$;
 
@@ -384,7 +395,7 @@ drop policy if exists credentials_select on public.credentials;
 create policy credentials_select on public.credentials
   for select to authenticated using (
     public.is_admin() or (
-      not public.is_staff() and exists (
+      public.is_active_user() and not public.is_staff() and exists (
         select 1 from public.assignments a
         where a.project_id = credentials.project_id and a.user_id = auth.uid()
       )
@@ -441,35 +452,43 @@ create policy feedback_admin on public.feedback
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
 drop policy if exists feedback_subject_select on public.feedback;
 create policy feedback_subject_select on public.feedback
-  for select to authenticated using (subject_profile_id = auth.uid());
+  for select to authenticated using (public.is_active_user() and subject_profile_id = auth.uid());
 
 -- ============================================================================
 --  PHASE 9 — lightweight CRM (pipeline) + per-project expense ledger
 --  Idempotent. Additive. Admin-only money; employee flows are untouched.
 --
 --  CRM re-uses the existing `projects` model rather than a separate app: an
---  incoming opportunity is just a project with a `pipeline_stage` set. When it's
---  won it keeps flowing through the same assignment / timesheet / books lifecycle.
---  The operational `status` (Active / On Hold / …) stays separate from the sales
---  `pipeline_stage` (Lead / Qualified / …) so a project can be both.
+--  incoming candidate is a project with a matching admin-only `project_crm` row.
+--  Once the candidate starts it keeps flowing through the same assignment /
+--  timesheet / books lifecycle. The operational `status` (Active / On Hold / …) stays
+--  separate from the recruiting `pipeline_stage` (Offer / Background check /
+--  Expected start) so a project can be both.
 -- ============================================================================
 
--- CRM fields on projects. All nullable + additive; a null pipeline_stage means
--- "not a tracked opportunity" (a normal project). Deal value is integer cents to
--- match the rest of the money layer (invoices, rates).
-alter table public.projects add column if not exists pipeline_stage        text;
-alter table public.projects add column if not exists contact_name          text;
-alter table public.projects add column if not exists contact_email         text;
-alter table public.projects add column if not exists source                text;   -- where the lead came from
-alter table public.projects add column if not exists next_step             text;   -- next action to move it forward
-alter table public.projects add column if not exists next_step_on          date;   -- when that next action is due
-alter table public.projects add column if not exists estimated_value_cents bigint; -- deal size (integer cents)
+-- CRM / recruiting-pipeline fields live in their OWN admin-only table, NOT on
+-- projects: projects_select is row-level (an assigned non-admin employee can read
+-- their project's whole row via the REST API), so candidate PII + hourly rate must
+-- sit behind is_admin() — the same pattern as assignment_rates / expenses /
+-- invoices. `pay_type` (employment type) stays on projects as operational,
+-- non-sensitive metadata.
+create table if not exists public.project_crm (
+  project_id            uuid primary key references public.projects(id) on delete cascade,
+  pipeline_stage        text check (pipeline_stage is null or pipeline_stage in ('Offer','Background check','Expected start')),
+  contact_name          text,
+  contact_email         text,
+  contact_phone         text,   -- point-of-contact phone
+  source                text,   -- (legacy: where the lead came from — no longer surfaced)
+  next_step             text,   -- next action to move it forward
+  next_step_on          date,   -- when that next action is due
+  estimated_value_cents bigint, -- candidate hourly rate (integer cents)
+  updated_at            timestamptz not null default now()
+);
 
--- Constrain pipeline_stage to the known set (nullable). Drop + re-add so it's
--- idempotent, mirroring the role-check pattern above.
-alter table public.projects drop constraint if exists projects_pipeline_stage_check;
-alter table public.projects add  constraint projects_pipeline_stage_check
-  check (pipeline_stage is null or pipeline_stage in ('Lead','Qualified','Proposal','Won','Lost'));
+alter table public.project_crm enable row level security;
+drop policy if exists project_crm_admin on public.project_crm;
+create policy project_crm_admin on public.project_crm
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
 -- Per-project expense ledger. Admin-only, like invoices / assignment_rates —
 -- cost/money lives only where is_admin() can reach it. amount_cents is a

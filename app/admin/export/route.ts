@@ -1,9 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-
-function csvCell(v: unknown): string {
-  const s = v == null ? "" : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
+import { csvCell } from "@/lib/csv";
 
 export async function GET() {
   const supabase = await createClient();

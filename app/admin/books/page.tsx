@@ -8,6 +8,7 @@ import {
   buildRateByPair,
   lineMoneyCents,
   fetchAllRows,
+  sumExpenseCents,
   usdCents,
 } from "@/lib/books";
 
@@ -30,7 +31,7 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
   const prevMonth = fmt(new Date(y, m - 2, 1));
   const nextMonth = fmt(new Date(y, m, 1));
 
-  const [timesheets, { data: assignments }, { data: rates }] = await Promise.all([
+  const [timesheets, { data: assignments }, { data: rates }, { data: expenses }] = await Promise.all([
     fetchAllRows((from, to) =>
       supabase
         .from("timesheets")
@@ -41,6 +42,8 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
     ),
     supabase.from("assignments").select("id, user_id, project_id"),
     supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate"),
+    // Expenses spent in this month (admin-only via RLS). They roll into Net below.
+    supabase.from("expenses").select("project_id, amount_cents").gte("spent_on", start).lte("spent_on", end),
   ]);
 
   const rateByPair = buildRateByPair(assignments, rates);
@@ -83,7 +86,9 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
 
   const margin = revenue - billableCost;
   const totalCost = billableCost + overhead;
-  const net = revenue - totalCost;
+  // Project expenses for the month reduce Net (labor cost + overhead + expenses).
+  const expensesTotal = sumExpenseCents(expenses);
+  const net = revenue - totalCost - expensesTotal;
   const marginPct = revenue > 0 ? (margin / revenue) * 100 : 0;
   const projects = [...byProject.values()].sort((a, b) => b.revenue - a.revenue);
   const consultants = [...byConsultant.values()].sort((a, b) => b.hours - a.hours);
@@ -123,7 +128,7 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
           </div>
           <p className="intro" style={{ marginTop: 8 }}>
             Revenue and cost from logged hours × rates. Billable = both rates set; overhead = pay-only
-            (staff / internal time). Admin-only.
+            (staff / internal time). Project expenses spent this month are subtracted from Net. Admin-only.
           </p>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginTop: 8 }}>
@@ -132,7 +137,8 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
             <div style={tile}><div style={tileLabel}>Margin</div><div style={{ ...tileValue, color: margin >= 0 ? "var(--green)" : "var(--red)" }}>{usdCents(margin)}</div></div>
             <div style={tile}><div style={tileLabel}>Margin %</div><div style={tileValue}>{revenue > 0 ? marginPct.toFixed(1) + "%" : "—"}</div></div>
             <div style={tile}><div style={tileLabel}>Overhead</div><div style={tileValue}>{usdCents(overhead)}</div></div>
-            <div style={tile}><div style={tileLabel}>Net (after overhead)</div><div style={{ ...tileValue, color: net >= 0 ? "var(--green)" : "var(--red)" }}>{usdCents(net)}</div></div>
+            <div style={tile}><div style={tileLabel}>Expenses</div><div style={{ ...tileValue, color: expensesTotal > 0 ? "var(--red)" : undefined }}>{usdCents(expensesTotal)}</div></div>
+            <div style={tile}><div style={tileLabel}>Net (after all costs)</div><div style={{ ...tileValue, color: net >= 0 ? "var(--green)" : "var(--red)" }}>{usdCents(net)}</div></div>
             <div style={tile}><div style={tileLabel}>Hours</div><div style={tileValue}>{fmtHours(totalHours)}</div></div>
           </div>
         </section>
