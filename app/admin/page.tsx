@@ -93,6 +93,9 @@ export default async function Admin() {
             <Link className="navlink" href="/admin/payroll">
               Payroll
             </Link>
+            <Link className="navlink" href="/admin/payroll/runs">
+              Payroll runs
+            </Link>
             <Link className="navlink" href="/admin/invoices">
               Invoices
             </Link>

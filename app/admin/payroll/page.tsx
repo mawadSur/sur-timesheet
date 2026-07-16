@@ -2,6 +2,7 @@ import Link from "next/link";
 import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/actions";
+import { createPayrollRun } from "@/app/payroll-actions";
 import { buildRateHistoryByPair, fetchAllRows, usdCents } from "@/lib/books";
 import { resolvePayPeriod, payrollByContractor } from "@/lib/payroll";
 
@@ -45,6 +46,7 @@ export default async function Payroll({ searchParams }: { searchParams: Promise<
           <div className="wordmark">{BRAND.name}<small>Payroll</small></div>
           <nav className="topnav">
             <Link className="navlink" href="/admin">Admin</Link>
+            <Link className="navlink" href="/admin/payroll/runs">Runs</Link>
             <Link className="navlink" href="/admin/books">Books</Link>
             <Link className="navlink" href="/admin/invoices">Invoices</Link>
             <a className="navlink" href={`/admin/payroll/export?period=${period.key}`}>Export CSV</a>
@@ -61,6 +63,10 @@ export default async function Payroll({ searchParams }: { searchParams: Promise<
             <div style={{ display: "flex", gap: 8, marginLeft: "auto", alignItems: "center" }}>
               <Link className="btn-sm" href={`/admin/payroll?period=${period.prevKey}`}>← Prev</Link>
               <Link className="btn-sm" href={`/admin/payroll?period=${period.nextKey}`}>Next →</Link>
+              <form action={createPayrollRun}>
+                <input type="hidden" name="period_key" value={period.key} />
+                <button type="submit" className="btn">Finalize as payroll run</button>
+              </form>
             </div>
           </div>
           <p className="intro" style={{ marginTop: 8 }}>

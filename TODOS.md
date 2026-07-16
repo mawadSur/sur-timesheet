@@ -71,6 +71,57 @@ Priority (P1–P3)** and **Depends on**.
 
 ---
 
+## Frontend / navigation (make the app easier to get around)
+
+Reviewed 2026-07-16. Every page hand-rolls its own `<nav className="topnav">`, so
+the reachable sections change page to page and there is no "you are here" cue. From
+**Invoices** you can only reach Admin + Books; from **RescueTime**/**Audit** only
+Admin + Timesheet; **Books** can't reach Dashboard/CRM/RescueTime/Audit — you bounce
+through `/admin` to get anywhere.
+
+- [ ] **One shared `<TopNav>` component — replace the ~10 hand-copied navs.**
+  - **What:** Extract `components/TopNav.tsx` (an admin variant + an employee
+    variant) that renders ONE consistent link set, and use it on every page in
+    place of each hand-rolled `<nav className="topnav">` block.
+  - **Why:** Ends the per-page link drift so every section is reachable from
+    everywhere; single source of truth for the header.
+  - **Effort:** M · **Priority:** P1
+  - **Depends on:** nothing.
+- [ ] **Active-state highlighting in the nav.**
+  - **What:** Mark the current section via client `usePathname()` +
+    `aria-current="page"` and a visual accent (underline or pill). Fold into `<TopNav>`.
+  - **Why:** 9 identical `.navlink`s today give zero indication of where you are.
+  - **Effort:** S · **Priority:** P1
+  - **Depends on:** shared `<TopNav>`.
+- [ ] **Make the logo / wordmark a home link.**
+  - **What:** Wrap `.logo`/`.wordmark` in a `<Link>` (admin → `/admin`, employee →
+    `/`). It's a plain `<div>` right now.
+  - **Why:** Click-logo-to-go-home is a universal affordance; its absence makes
+    pages feel like dead ends.
+  - **Effort:** S · **Priority:** P2
+  - **Depends on:** shared `<TopNav>` (ship together).
+- [ ] **Group the nav + separate utilities.**
+  - **What:** Cluster the money section (Books · Invoices · Payroll · Payroll runs)
+    and push utilities (Export CSV, Audit, Log out) to the right; consider a
+    "More ▾" overflow for the long tail on the hub.
+  - **Why:** Primary sections and one-off utilities are styled identically today.
+  - **Effort:** M · **Priority:** P2
+  - **Depends on:** shared `<TopNav>`.
+- [ ] **Breadcrumbs on detail pages.**
+  - **What:** Add a trail on `/admin/invoices/[id]`, `/admin/projects/[id]`, and
+    `/admin/payroll/runs/[id]` (e.g. "Invoices / #INV-123").
+  - **Why:** Detail pages have no consistent back / where-am-I trail.
+  - **Effort:** S · **Priority:** P2
+  - **Depends on:** nothing.
+- [ ] **Responsive nav.**
+  - **What:** Collapse the top bar to a disclosure/menu under a narrow breakpoint
+    instead of wrapping the flat link row.
+  - **Why:** The tool does get opened on phones; the wrapping bar is rough there.
+  - **Effort:** M · **Priority:** P3
+  - **Depends on:** shared `<TopNav>`.
+
+---
+
 ## Out of scope (intentionally deferred — it's an internal tool)
 
 - **Custom domain** — the `*.vercel.app` URL is fine for an internal audience.

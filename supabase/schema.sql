@@ -138,6 +138,9 @@ create policy timesheets_insert on public.timesheets
       where a.user_id = auth.uid() and a.project_id = timesheets.project_id
     )
   );
+-- NOTE: timesheets_modify (owner DELETE) is re-created near the end of this
+-- file to add the paid-lock (see "LOCK HOURS ONCE PAID"). It is defined here
+-- too so the ordering is clear; the later drop/recreate wins.
 drop policy if exists timesheets_modify on public.timesheets;
 create policy timesheets_modify on public.timesheets
   for delete to authenticated using (public.is_admin() or (public.is_active_user() and user_id = auth.uid()));
@@ -369,6 +372,58 @@ as $$
 $$;
 
 -- ============================================================================
+--  PAYROLL RUNS — finalizable contractor payouts (system of record)
+--  Idempotent. Mirrors the invoice lifecycle: a run FREEZES a pay period's
+--  breakdown (one line per contractor × project) so it can be marked paid and
+--  later voided. Draft runs regenerate from live data or are deleted.
+-- ============================================================================
+
+-- One run per pay period. total_cents is the frozen sum of its line amounts.
+create table if not exists public.payroll_runs (
+  id           uuid primary key default gen_random_uuid(),
+  period_key   text not null unique,
+  period_start date not null,
+  period_end   date not null,
+  status       text not null default 'draft' check (status in ('draft','paid','void')),
+  total_cents  bigint not null default 0,
+  paid_on      date,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+-- Frozen breakdown lines: one per (contractor × project) in the run.
+create table if not exists public.payroll_run_lines (
+  id           uuid primary key default gen_random_uuid(),
+  run_id       uuid not null references public.payroll_runs(id) on delete cascade,
+  user_id      uuid not null references public.profiles(id) on delete restrict,
+  user_name    text,
+  project_id   uuid,
+  project_name text,
+  hours        numeric(10,2) not null default 0,
+  pay_rate     numeric(10,2),
+  amount_cents bigint not null default 0,
+  created_at   timestamptz not null default now()
+);
+
+alter table public.payroll_runs      enable row level security;
+alter table public.payroll_run_lines enable row level security;
+
+drop policy if exists payroll_runs_admin on public.payroll_runs;
+create policy payroll_runs_admin on public.payroll_runs
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- Admin-only. The run header carries total_cents (company-wide payroll total),
+-- so there is NO contractor-facing SELECT; a self-serve pay stub is a follow-up
+-- that needs a column-scoped view. Drops remove the earlier leaky policies.
+drop policy if exists payroll_runs_own_paid on public.payroll_runs;
+
+drop policy if exists payroll_run_lines_admin on public.payroll_run_lines;
+create policy payroll_run_lines_admin on public.payroll_run_lines
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+drop policy if exists payroll_run_lines_own_paid on public.payroll_run_lines;
+
+-- ============================================================================
 --  PHASE 6 — "Staff" role: a restricted support type
 --  Staff log hours like employees but are blocked from project credentials.
 --  Idempotent.
@@ -516,3 +571,51 @@ alter table public.expenses enable row level security;
 drop policy if exists expenses_admin on public.expenses;
 create policy expenses_admin on public.expenses
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- ============================================================================
+--  LOCK HOURS ONCE PAID
+--
+--  A timesheet row becomes read-only for the EMPLOYEE (they can no longer
+--  DELETE — nor UPDATE, though no owner UPDATE policy exists — their own row)
+--  once it has been PAID: its work_date falls inside a PAID invoice's period
+--  for its project, OR inside a PAID payroll run's period where that user has a
+--  run line. Admins keep full control; INSERT / SELECT are unchanged.
+--
+--  Defined here (not next to the timesheets policies above) because the
+--  function body reads public.invoices / public.payroll_runs, which must exist
+--  first. This drop/recreate of timesheets_modify supersedes the plain owner
+--  DELETE policy defined earlier so a fresh build ends locked.
+-- ============================================================================
+create or replace function public.timesheet_is_locked(ts_user uuid, ts_project uuid, ts_date date)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  -- Only answer truthfully for the caller's own rows (or an admin), so this
+  -- SECURITY DEFINER function can't be probed as an oracle over who has paid
+  -- invoices / payroll runs. In the RLS owner-delete policy ts_user is always the
+  -- caller's own user_id, so lock enforcement is unaffected.
+  select (public.is_admin() or ts_user = auth.uid()) and (
+    exists (
+      select 1 from public.invoices i
+      where i.project_id = ts_project and i.status = 'paid'
+        and ts_date between i.period_start and i.period_end
+    ) or exists (
+      select 1 from public.payroll_runs pr
+      join public.payroll_run_lines prl on prl.run_id = pr.id
+      where pr.status = 'paid' and prl.user_id = ts_user
+        and ts_date between pr.period_start and pr.period_end
+    )
+  );
+$$;
+
+drop policy if exists timesheets_modify on public.timesheets;
+create policy timesheets_modify on public.timesheets
+  for delete to authenticated using (
+    public.is_admin() or (
+      public.is_active_user() and user_id = auth.uid()
+      and not public.timesheet_is_locked(user_id, project_id, work_date)
+    )
+  );
