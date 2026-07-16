@@ -132,7 +132,9 @@ export function dollarsToCents(input: FormDataEntryValue | string | null | undef
   if (s === "") return null;
   const n = Number(s);
   if (!Number.isFinite(n) || n < 0 || n > 1_000_000_000) return null;
-  return Math.round(n * 100);
+  // Cancel binary-float error before the half-up round so a sub-cent input like
+  // "1.005" (1.005*100 === 100.49999999999999) rounds up to 101, not down to 100.
+  return Math.round(Number((n * 100).toFixed(4)));
 }
 
 // Sum an expense ledger's amount_cents (integer cents, no float drift).

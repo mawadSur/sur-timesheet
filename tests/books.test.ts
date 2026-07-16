@@ -189,6 +189,10 @@ describe("dollarsToCents", () => {
     expect(dollarsToCents("149.99")).toBe(14999);
     expect(dollarsToCents("25000")).toBe(2500000);
     expect(dollarsToCents("0.005")).toBe(1); // 0.5c rounds half-up to 1c
+    // Sub-cent inputs whose *100 lands just below .5 in binary float must still
+    // round half-up (regression guard for the toFixed pre-round).
+    expect(dollarsToCents("1.005")).toBe(101); // 1.005*100 === 100.4999999… -> 101
+    expect(dollarsToCents("0.145")).toBe(15);
   });
 
   it("tolerates '$' and thousands separators", () => {

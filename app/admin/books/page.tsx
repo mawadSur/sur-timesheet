@@ -31,7 +31,7 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
   const prevMonth = fmt(new Date(y, m - 2, 1));
   const nextMonth = fmt(new Date(y, m, 1));
 
-  const [timesheets, { data: assignments }, { data: rates }, { data: expenses }] = await Promise.all([
+  const [timesheets, { data: assignments }, { data: rates }, expenses] = await Promise.all([
     fetchAllRows((from, to) =>
       supabase
         .from("timesheets")
@@ -42,8 +42,16 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
     ),
     supabase.from("assignments").select("id, user_id, project_id"),
     supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate"),
-    // Expenses spent in this month (admin-only via RLS). They roll into Net below.
-    supabase.from("expenses").select("project_id, amount_cents").gte("spent_on", start).lte("spent_on", end),
+    // Expenses spent in this month (admin-only via RLS). Paged like timesheets so
+    // a high-volume month can't be silently truncated by the PostgREST row cap.
+    fetchAllRows((from, to) =>
+      supabase
+        .from("expenses")
+        .select("project_id, amount_cents")
+        .gte("spent_on", start)
+        .lte("spent_on", end)
+        .range(from, to)
+    ),
   ]);
 
   const rateByPair = buildRateByPair(assignments, rates);
