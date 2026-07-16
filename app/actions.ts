@@ -335,15 +335,32 @@ export async function unassignProject(
 
 // ── Admin: per-assignment billing rates (money is admin-only) ────────────────────
 // bill_rate = what the client pays/hour; pay_rate = what we pay the consultant/hour.
-// A blank field is an intentional clear (-> null). An invalid entry (negative /
-// NaN / absurd) is NOT written at all, so a fat-fingered value can't silently
-// wipe a previously-saved valid rate — the prior value is preserved on upsert.
+// An OMITTED field (not submitted at all — the admin never touched that input) is
+// NOT present, so the caller carries forward the value in effect as of the chosen
+// date. This is critical for back-dated corrections: editing just one rate must
+// never overwrite the OTHER rate's real historical value with today's pre-filled
+// number. A blank (submitted but empty) field is an intentional clear (-> null).
+// An invalid entry (negative / NaN / absurd) is likewise not written, so a fat-
+// fingered value can't silently wipe a previously-saved valid rate.
 function parseRateField(v: FormDataEntryValue | null): { present: boolean; value: number | null } {
-  const s = String(v ?? "").trim();
+  if (v === null) return { present: false, value: null }; // field omitted -> carry forward
+  const s = String(v).trim();
   if (s === "") return { present: true, value: null }; // intentional clear
   const n = Number(s);
   if (!Number.isFinite(n) || n < 0 || n > 100000) return { present: false, value: null }; // invalid -> omit
   return { present: true, value: Math.round(n * 100) / 100 };
+}
+
+// Parse an optional "effective_from" (YYYY-MM-DD). Returns the date only if it is
+// a REAL calendar date — the regex rejects out-of-range fields (2026-13-45) and
+// the round-trip Date check rejects impossible days that pass the regex
+// (2026-02-31 → March). Anything invalid/blank returns null so the caller
+// defaults to today.
+function parseEffectiveFrom(v: FormDataEntryValue | null): string | null {
+  const s = String(v ?? "").trim();
+  if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s ? null : s;
 }
 
 export async function setAssignmentRate(
@@ -355,28 +372,30 @@ export async function setAssignmentRate(
   if (!assignment_id) return { ok: false, error: "Missing assignment." };
   const bill = parseRateField(formData.get("bill_rate"));
   const pay = parseRateField(formData.get("pay_rate"));
-  // A rate change takes effect TODAY; hours already worked keep the rate that was
-  // in effect when they happened (effective-dated history). Carry forward the
-  // currently-effective value for any field left blank, so setting just one rate
-  // doesn't null out the other from today onward.
+  // A rate change takes effect on the CHOSEN date (defaulting to today); hours
+  // already worked keep the rate that was in effect when they happened
+  // (effective-dated history). An admin can back-date the row to correct a past
+  // rate. Carry forward the value in effect AS OF the chosen date for any field
+  // left blank, so setting just one rate doesn't null out the other.
   const today = new Date().toISOString().slice(0, 10);
+  const chosenDate = parseEffectiveFrom(formData.get("effective_from")) ?? today;
   const { data: current } = await supabase
     .from("assignment_rates")
     .select("bill_rate, pay_rate")
     .eq("assignment_id", assignment_id)
-    .lte("effective_from", today)
+    .lte("effective_from", chosenDate)
     .order("effective_from", { ascending: false })
     .limit(1)
     .maybeSingle();
   const payload: Record<string, unknown> = {
     assignment_id,
-    effective_from: today,
+    effective_from: chosenDate,
     bill_rate: bill.present ? bill.value : current?.bill_rate == null ? null : Number(current.bill_rate),
     pay_rate: pay.present ? pay.value : current?.pay_rate == null ? null : Number(current.pay_rate),
     updated_at: new Date().toISOString(),
   };
-  // Upsert today's dated row (editing the rate again the same day replaces it;
-  // a change on a later day appends a new row and preserves history).
+  // Upsert the dated row (choosing a date that already has a row replaces it — a
+  // true correction; a new date appends a row and preserves history).
   const { data, error } = await supabase
     .from("assignment_rates")
     .upsert(payload, { onConflict: "assignment_id,effective_from" })
@@ -386,7 +405,7 @@ export async function setAssignmentRate(
   await logAudit("set_rate", {
     target: assignment_id,
     metadata: {
-      effective_from: today,
+      effective_from: chosenDate,
       bill_rate: bill.present ? bill.value : undefined,
       pay_rate: pay.present ? pay.value : undefined,
     },

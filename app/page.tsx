@@ -41,6 +41,9 @@ export default async function Home() {
             <small>{BRAND.tagline}</small>
           </div>
           <nav className="topnav">
+            <Link className="navlink" href="/pay">
+              My pay
+            </Link>
             {isAdmin && (
               <Link className="navlink" href="/admin">
                 Admin

@@ -66,6 +66,26 @@ export default async function Admin() {
   // Current rate per assignment (latest effective_from on or before today).
   const today = new Date().toISOString().slice(0, 10);
   const rateByAssignment = latestRateByAssignment(rates, today);
+  // Full rate HISTORY per assignment (every dated row, newest effective_from
+  // first) so each rate form can show past corrections/changes.
+  const historyByAssignment = new Map<
+    string,
+    { effective_from: string; bill_rate: number | null; pay_rate: number | null }[]
+  >();
+  for (const r of (rates ?? []) as any[]) {
+    const arr = historyByAssignment.get(r.assignment_id) ?? [];
+    arr.push({
+      effective_from: String(r.effective_from),
+      bill_rate: r.bill_rate == null ? null : Number(r.bill_rate),
+      pay_rate: r.pay_rate == null ? null : Number(r.pay_rate),
+    });
+    historyByAssignment.set(r.assignment_id, arr);
+  }
+  for (const arr of historyByAssignment.values()) {
+    arr.sort((a, b) =>
+      a.effective_from < b.effective_from ? 1 : a.effective_from > b.effective_from ? -1 : 0
+    );
+  }
   const totalHours = (timesheets ?? []).reduce((s, t) => s + Number(t.hours), 0);
   const name = (n: Named) => n?.full_name || n?.email || "—";
 
@@ -330,6 +350,7 @@ export default async function Admin() {
                           ? null
                           : Number(rateByAssignment.get(a.id)?.pay_rate)
                       }
+                      history={historyByAssignment.get(a.id) ?? []}
                     />
                   </td>
                   <td className="right">
