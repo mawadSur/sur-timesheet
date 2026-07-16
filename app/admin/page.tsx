@@ -89,6 +89,9 @@ export default async function Admin() {
             <Link className="navlink" href="/admin/books">
               Books
             </Link>
+            <Link className="navlink" href="/admin/payroll">
+              Payroll
+            </Link>
             <Link className="navlink" href="/admin/invoices">
               Invoices
             </Link>

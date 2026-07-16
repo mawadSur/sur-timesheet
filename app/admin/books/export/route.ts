@@ -20,7 +20,19 @@ export async function GET(request: Request) {
   if (profile?.role !== "admin") return new Response("Forbidden", { status: 403 });
 
   const url = new URL(request.url);
-  const { month, start, end } = resolveMonthWindow(url.searchParams.get("month") || "");
+  // Optional custom date range mirrors the Books page; falls back to a month.
+  const isDate = (s: string | null) => {
+    if (!s || !/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(s)) return false;
+    const d = new Date(`${s}T00:00:00Z`); // reject unreal dates (e.g. Feb 31) via round-trip
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  };
+  const fromParam = url.searchParams.get("from");
+  const toParam = url.searchParams.get("to");
+  const customRange = isDate(fromParam) && isDate(toParam) && (fromParam as string) <= (toParam as string);
+  const mw = resolveMonthWindow(url.searchParams.get("month") || "");
+  const start = customRange ? (fromParam as string) : mw.start;
+  const end = customRange ? (toParam as string) : mw.end;
+  const label = customRange ? `${start}_to_${end}` : mw.month;
 
   const [rows, { data: assignments }, { data: rates }] = await Promise.all([
     fetchAllRows((from, to) =>
@@ -71,7 +83,7 @@ export async function GET(request: Request) {
   return new Response(lines.join("\n"), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="sur-books-${month}.csv"`,
+      "Content-Disposition": `attachment; filename="sur-books-${label}.csv"`,
     },
   });
 }

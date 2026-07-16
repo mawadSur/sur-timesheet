@@ -7,6 +7,7 @@ import { requireAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { grantTailscaleAccess, revokeTailscaleAccess } from "@/lib/tailscale";
 import { grantDiscordChannelAccess, revokeDiscordChannelAccess } from "@/lib/discord";
+import { sendInviteEmail } from "@/lib/email";
 import { dollarsToCents } from "@/lib/books";
 import { asPipelineStage, asPayType } from "@/lib/crm";
 import type { RateState, AssignState, UnassignState } from "@/app/assignment-state";
@@ -81,8 +82,20 @@ export async function addAllowedEmail(formData: FormData) {
   const email = String(formData.get("email") || "").trim().toLowerCase();
   const role = asRole(formData.get("role"));
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return;
+  // Only a brand-new address gets an invite email — re-saving to change a
+  // person's role shouldn't re-notify them.
+  const { data: existing } = await supabase
+    .from("allowed_emails")
+    .select("email")
+    .eq("email", email)
+    .maybeSingle();
   await supabase.from("allowed_emails").upsert({ email, role });
   await logAudit("add_allowed_email", { target: email });
+  if (!existing) {
+    // Best-effort: tell them they can sign in now. No-ops when email isn't
+    // configured (RESEND_API_KEY/INVITE_FROM_EMAIL unset); never blocks the add.
+    await sendInviteEmail({ to: email });
+  }
   revalidatePath("/admin");
 }
 

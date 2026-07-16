@@ -1,6 +1,15 @@
 import { defineConfig } from "vitest/config";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  // Mirror tsconfig's "@/*" -> "./*" path alias so `@/lib/...` imports resolve
+  // deterministically (no vite-tsconfig-paths plugin, no reliance on a warm cache).
+  resolve: {
+    alias: [{ find: /^@\//, replacement: `${root}/` }],
+  },
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],

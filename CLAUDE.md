@@ -60,6 +60,11 @@ product. Live at **https://sur-timesheet.vercel.app** (Vercel project
 - `lib/books.ts` — billing/invoice math: month windows, per-line money, billable
   invoice-line aggregation (integer cents, half-up rounding).
 - `lib/csv.ts` — CSV cell escaping / row building for exports.
+- `lib/payroll.ts` — semi-monthly pay-period windows (1st–15th, 16th–month-end) and
+  per-contractor payout aggregation (hours × pay_rate) for the admin Payroll page
+  (`app/admin/payroll/page.tsx` + `.../export/route.ts`).
+- `lib/email.ts` — `sendInviteEmail` via Resend (feature-gated on `RESEND_API_KEY`
+  + `INVITE_FROM_EMAIL`; no-op when unset). Fired when a new email is allowlisted.
 - `lib/dates.ts` — pure date helpers (`isEnded`, `projectPhase`) for project phase
   (upcoming / active / ended), timezone-safe.
 - `lib/tailscale.ts` — `grantTailscaleAccess` / `revokeTailscaleAccess`
@@ -133,6 +138,10 @@ product. Live at **https://sur-timesheet.vercel.app** (Vercel project
 | `ANTHROPIC_API_KEY` | Claude API key used by the discord-status cron to summarize activity. **Optional / feature-gated** — unset ⇒ summarization is skipped. |
 | `TAILSCALE_API_KEY` | Tailscale API key for auto-invite / ACL provisioning. **Optional / feature-gated** — needs `TAILSCALE_TAILNET` too; either unset ⇒ Tailscale integration no-ops. |
 | `TAILSCALE_TAILNET` | Tailscale tailnet name (e.g. `example.com`). Pairs with `TAILSCALE_API_KEY`. **Optional / feature-gated.** |
+| `RESCUETIME_API_KEY` | RescueTime Analytic Data API key for the hours bridge (`lib/rescuetime.ts`). **Optional / feature-gated** — unset ⇒ the RescueTime bridge returns no data. |
+| `RESEND_API_KEY` | Resend API key for outbound invite emails (`lib/email.ts`). **Optional / feature-gated** — needs `INVITE_FROM_EMAIL` too; either unset ⇒ invite emails no-op. |
+| `INVITE_FROM_EMAIL` | From address for invite emails (must sit on a Resend-verified domain). Pairs with `RESEND_API_KEY`. **Optional / feature-gated.** |
+| `NEXT_PUBLIC_SITE_URL` | Public base URL used in invite-email links. **Optional** — defaults to `https://sur-timesheet.vercel.app`. |
 
 Set the **required** vars on **Vercel** (all environments) and in local
 **`.env.local`**; add the optional/feature-gated ones only when you turn that

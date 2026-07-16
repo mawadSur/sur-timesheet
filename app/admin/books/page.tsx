@@ -22,11 +22,21 @@ function monthLabel(month: string) {
 
 type Agg = { id: string; name: string; hours: number; revenue: number; billableCost: number; overhead: number };
 
-export default async function Books({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
+export default async function Books({ searchParams }: { searchParams: Promise<{ month?: string; from?: string; to?: string }> }) {
   const sp = await searchParams;
   const supabase = await createClient();
 
-  const { month, start, end, y, m } = resolveMonthWindow(sp.month);
+  const { month, start: mStart, end: mEnd, y, m } = resolveMonthWindow(sp.month);
+  // Optional custom date range: ?from=YYYY-MM-DD&to=YYYY-MM-DD overrides the month
+  // window for the on-screen figures. Invoicing stays monthly (see below).
+  const isDate = (s?: string) => {
+    if (typeof s !== "string" || !/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(s)) return false;
+    const d = new Date(`${s}T00:00:00Z`); // reject unreal dates (e.g. Feb 31) via round-trip
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  };
+  const custom = isDate(sp.from) && isDate(sp.to) && (sp.from as string) <= (sp.to as string);
+  const start = custom ? (sp.from as string) : mStart;
+  const end = custom ? (sp.to as string) : mEnd;
   const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   const prevMonth = fmt(new Date(y, m - 2, 1));
   const nextMonth = fmt(new Date(y, m, 1));
@@ -38,6 +48,7 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
         .select("user_id, project_id, hours, profiles(full_name, email), projects(name)")
         .gte("work_date", start)
         .lte("work_date", end)
+        .order("id")
         .range(from, to)
     ),
     supabase.from("assignments").select("id, user_id, project_id"),
@@ -50,6 +61,7 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
         .select("project_id, amount_cents")
         .gte("spent_on", start)
         .lte("spent_on", end)
+        .order("id")
         .range(from, to)
     ),
   ]);
@@ -114,8 +126,9 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
           <div className="wordmark">{BRAND.name}<small>Books</small></div>
           <nav className="topnav">
             <Link className="navlink" href="/admin">Admin</Link>
+            <Link className="navlink" href="/admin/payroll">Payroll</Link>
             <Link className="navlink" href="/admin/invoices">Invoices</Link>
-            <a className="navlink" href={`/admin/books/export?month=${month}`}>Export CSV</a>
+            <a className="navlink" href={custom ? `/admin/books/export?from=${start}&to=${end}` : `/admin/books/export?month=${month}`}>Export CSV</a>
             <form action={signOut}><button type="submit" className="navlink navbtn">Log out</button></form>
           </nav>
         </div>
@@ -124,7 +137,7 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
       <main className="page admin">
         <section className="card">
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <h2 className="card-title" style={{ margin: 0 }}>Books &mdash; {monthLabel(month)}</h2>
+            <h2 className="card-title" style={{ margin: 0 }}>Books &mdash; {custom ? `${start} → ${end}` : monthLabel(month)}</h2>
             <div style={{ display: "flex", gap: 8, marginLeft: "auto", alignItems: "center" }}>
               <Link className="btn-sm" href={`/admin/books?month=${prevMonth}`}>← Prev</Link>
               <form method="get" style={{ display: "flex", gap: 6 }}>
@@ -133,6 +146,17 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
               </form>
               <Link className="btn-sm" href={`/admin/books?month=${nextMonth}`}>Next →</Link>
             </div>
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+            <span className="muted-cell" style={{ fontSize: 13 }}>Custom range</span>
+            <form method="get" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="hidden" name="month" value={month} />
+              <input type="date" name="from" defaultValue={custom ? start : ""} required />
+              <span className="muted-cell">→</span>
+              <input type="date" name="to" defaultValue={custom ? end : ""} required />
+              <button type="submit" className="btn-sm">Apply</button>
+            </form>
+            {custom && <Link className="btn-sm secondary" href={`/admin/books?month=${month}`}>Clear</Link>}
           </div>
           <p className="intro" style={{ marginTop: 8 }}>
             Revenue and cost from logged hours × rates. Billable = both rates set; overhead = pay-only
@@ -198,16 +222,20 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
                     <td className="right" style={{ color: pMargin >= 0 ? "var(--green)" : "var(--red)" }}>{usdCents(pMargin)}</td>
                     <td className="right muted-cell">{p.revenue > 0 ? ((pMargin / p.revenue) * 100).toFixed(1) + "%" : "—"}</td>
                     <td className="right">
-                      <form action={generateInvoice}>
-                        <input type="hidden" name="project_id" value={p.id} />
-                        <input type="hidden" name="month" value={month} />
-                        <button type="submit" className="btn-sm" title="Generate a draft invoice for this project & month">Invoice</button>
-                      </form>
+                      {custom ? (
+                        <span className="muted-cell" title="Switch to a month view to generate invoices">—</span>
+                      ) : (
+                        <form action={generateInvoice}>
+                          <input type="hidden" name="project_id" value={p.id} />
+                          <input type="hidden" name="month" value={month} />
+                          <button type="submit" className="btn-sm" title="Generate a draft invoice for this project & month">Invoice</button>
+                        </form>
+                      )}
                     </td>
                   </tr>
                 );
               })}
-              {projects.length === 0 && (<tr><td colSpan={8} className="muted-cell">No hours logged this month.</td></tr>)}
+              {projects.length === 0 && (<tr><td colSpan={8} className="muted-cell">No hours logged for this period.</td></tr>)}
             </tbody>
           </table>
         </section>
@@ -232,7 +260,7 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
                   <td className="right muted-cell">{usdCents(c.revenue)}</td>
                 </tr>
               ))}
-              {consultants.length === 0 && (<tr><td colSpan={4} className="muted-cell">No hours logged this month.</td></tr>)}
+              {consultants.length === 0 && (<tr><td colSpan={4} className="muted-cell">No hours logged for this period.</td></tr>)}
             </tbody>
           </table>
         </section>
