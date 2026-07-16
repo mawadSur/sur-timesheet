@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { csvCell } from "@/lib/csv";
-import { resolveMonthWindow, buildRateByPair, lineMoneyCents, fetchAllRows } from "@/lib/books";
+import { resolveMonthWindow, buildRateHistoryByPair, rateAsOf, lineMoneyCents, fetchAllRows } from "@/lib/books";
 
 // Money-aware timesheet export: hours × per-assignment rates → revenue/cost/margin,
 // with overhead (pay-only) broken out. Admin-only (middleware gates /admin, and
@@ -45,10 +45,10 @@ export async function GET(request: Request) {
         .range(from, to)
     ),
     supabase.from("assignments").select("id, user_id, project_id"),
-    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate"),
+    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate, effective_from"),
   ]);
 
-  const rateByPair = buildRateByPair(assignments, rates);
+  const rateHistory = buildRateHistoryByPair(assignments, rates);
   const money = (cents: number) => (cents / 100).toFixed(2);
   const header = ["Date", "Employee", "Email", "Project", "Hours", "Bill Rate", "Pay Rate", "Revenue", "Billable Cost", "Overhead", "Margin"];
   const lines = [header.join(",")];
@@ -57,7 +57,7 @@ export async function GET(request: Request) {
     const hrs = Number(t.hours) || 0;
     const { bill, pay, revCents, billableCostCents, overheadCents } = lineMoneyCents(
       hrs,
-      rateByPair.get(`${t.user_id}:${t.project_id}`)
+      rateAsOf(rateHistory.get(`${t.user_id}:${t.project_id}`), String(t.work_date))
     );
     const marginCents = revCents != null && billableCostCents != null ? revCents - billableCostCents : null;
 

@@ -16,6 +16,7 @@ import AssignPersonForm from "@/components/AssignPersonForm";
 import AssignmentRateForm from "@/components/AssignmentRateForm";
 import UnassignButton from "@/components/UnassignButton";
 import { projectPhase } from "@/lib/dates";
+import { latestRateByAssignment } from "@/lib/books";
 
 type Named = { full_name: string | null; email: string } | null;
 
@@ -52,7 +53,7 @@ export default async function Admin() {
       .from("assignments")
       .select("id, profiles(full_name, email), projects(name)")
       .order("assigned_at", { ascending: false }),
-    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate"),
+    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate, effective_from"),
     supabase
       .from("timesheets")
       .select("work_date, hours, notes, profiles(full_name, email), projects(name)")
@@ -64,9 +65,9 @@ export default async function Admin() {
   const profileByEmail = new Map(
     (profiles ?? []).map((p) => [p.email.toLowerCase(), p])
   );
-  const rateByAssignment = new Map(
-    (rates ?? []).map((r: any) => [r.assignment_id, r])
-  );
+  // Current rate per assignment (latest effective_from on or before today).
+  const today = new Date().toISOString().slice(0, 10);
+  const rateByAssignment = latestRateByAssignment(rates, today);
   const totalHours = (timesheets ?? []).reduce((s, t) => s + Number(t.hours), 0);
   const name = (n: Named) => n?.full_name || n?.email || "—";
 

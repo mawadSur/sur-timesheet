@@ -2,7 +2,7 @@ import Link from "next/link";
 import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/actions";
-import { buildRateByPair, fetchAllRows, usdCents } from "@/lib/books";
+import { buildRateHistoryByPair, fetchAllRows, usdCents } from "@/lib/books";
 import { resolvePayPeriod, payrollByContractor } from "@/lib/payroll";
 
 const fmtHours = (n: number) => (Math.round(n * 100) / 100).toLocaleString("en-US");
@@ -16,18 +16,18 @@ export default async function Payroll({ searchParams }: { searchParams: Promise<
     fetchAllRows((from, to) =>
       supabase
         .from("timesheets")
-        .select("user_id, project_id, hours, profiles(full_name, email), projects(name)")
+        .select("work_date, user_id, project_id, hours, profiles(full_name, email), projects(name)")
         .gte("work_date", period.start)
         .lte("work_date", period.end)
         .order("id")
         .range(from, to)
     ),
     supabase.from("assignments").select("id, user_id, project_id"),
-    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate"),
+    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate, effective_from"),
   ]);
 
-  const rateByPair = buildRateByPair(assignments, rates);
-  const rows = payrollByContractor(timesheets, rateByPair);
+  const rateHistory = buildRateHistoryByPair(assignments, rates);
+  const rows = payrollByContractor(timesheets, rateHistory);
 
   const totalCents = rows.reduce((s, r) => s + r.amount_cents, 0);
   const totalHours = rows.reduce((s, r) => s + r.hours, 0);
@@ -109,7 +109,7 @@ export default async function Payroll({ searchParams }: { searchParams: Promise<
                     <tr key={l.project_id}>
                       <td>{l.project_name}</td>
                       <td className="right">{fmtHours(l.hours)}</td>
-                      <td className="right">{l.pay_rate != null ? `$${Number(l.pay_rate).toFixed(2)}/h` : <span className="muted-cell">— none —</span>}</td>
+                      <td className="right">{l.pay_rate != null ? `$${Number(l.pay_rate).toFixed(2)}/h` : <span className="muted-cell">{l.mixedRate ? "mixed" : "— none —"}</span>}</td>
                       <td className="right">{l.missingRate ? <span className="muted-cell">—</span> : usdCents(l.amount_cents)}</td>
                     </tr>
                   ))}

@@ -6,7 +6,7 @@ import { requireAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import {
   resolveMonthWindow,
-  buildRateByPair,
+  buildRateHistoryByPair,
   billableInvoiceLines,
   fetchAllRows,
 } from "@/lib/books";
@@ -19,17 +19,18 @@ async function computeBillable(supabase: any, projectId: string, start: string, 
     fetchAllRows((from, to) =>
       supabase
         .from("timesheets")
-        .select("user_id, project_id, hours, profiles(full_name, email)")
+        .select("work_date, user_id, project_id, hours, profiles(full_name, email)")
         .eq("project_id", projectId)
         .gte("work_date", start)
         .lte("work_date", end)
+        .order("id")
         .range(from, to)
     ),
     supabase.from("assignments").select("id, user_id, project_id").eq("project_id", projectId),
-    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate"),
+    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate, effective_from"),
   ]);
-  const rateByPair = buildRateByPair(assignments, rates);
-  const lines = billableInvoiceLines(rows, rateByPair);
+  const rateHistory = buildRateHistoryByPair(assignments, rates);
+  const lines = billableInvoiceLines(rows, rateHistory);
   const subtotal_cents = lines.reduce((s, l) => s + l.amount_cents, 0);
   return { lines, subtotal_cents };
 }

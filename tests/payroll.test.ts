@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { resolvePayPeriod, payrollByContractor } from "@/lib/payroll";
+import { buildRateHistoryByPair } from "@/lib/books";
 
 describe("resolvePayPeriod", () => {
   it("defaults to the first half when now is on/before the 15th", () => {
@@ -59,21 +60,29 @@ describe("resolvePayPeriod", () => {
 });
 
 describe("payrollByContractor", () => {
-  const rateByPair = new Map<string, { pay_rate: number | null; bill_rate?: number | null }>([
-    ["u1:p1", { pay_rate: 50, bill_rate: 100 }],
-    ["u1:p2", { pay_rate: 40, bill_rate: null }], // overhead — still paid the contractor
-    ["u2:p1", { pay_rate: null }], // no pay rate on file
-  ]);
+  // Rates effective from the epoch, so every work_date prices the same.
+  const rateHistory = buildRateHistoryByPair(
+    [
+      { id: "a1", user_id: "u1", project_id: "p1" },
+      { id: "a2", user_id: "u1", project_id: "p2" },
+      // u2:p1 has no rate row on file -> missing
+    ],
+    [
+      { assignment_id: "a1", bill_rate: 100, pay_rate: 50, effective_from: "1970-01-01" },
+      { assignment_id: "a2", bill_rate: null, pay_rate: 40, effective_from: "1970-01-01" },
+    ]
+  );
+  const wd = "2026-07-01";
   const rows = [
-    { user_id: "u1", project_id: "p1", hours: 10, profiles: { full_name: "Alice" }, projects: { name: "Proj 1" } },
-    { user_id: "u1", project_id: "p1", hours: 2.5, profiles: { full_name: "Alice" }, projects: { name: "Proj 1" } },
-    { user_id: "u1", project_id: "p2", hours: 4, profiles: { full_name: "Alice" }, projects: { name: "Proj 2" } },
-    { user_id: "u2", project_id: "p1", hours: 8, profiles: { full_name: "Bob" }, projects: { name: "Proj 1" } },
-    { user_id: "u1", project_id: "p1", hours: 0, profiles: { full_name: "Alice" }, projects: { name: "Proj 1" } }, // ignored
+    { work_date: wd, user_id: "u1", project_id: "p1", hours: 10, profiles: { full_name: "Alice" }, projects: { name: "Proj 1" } },
+    { work_date: wd, user_id: "u1", project_id: "p1", hours: 2.5, profiles: { full_name: "Alice" }, projects: { name: "Proj 1" } },
+    { work_date: wd, user_id: "u1", project_id: "p2", hours: 4, profiles: { full_name: "Alice" }, projects: { name: "Proj 2" } },
+    { work_date: wd, user_id: "u2", project_id: "p1", hours: 8, profiles: { full_name: "Bob" }, projects: { name: "Proj 1" } },
+    { work_date: wd, user_id: "u1", project_id: "p1", hours: 0, profiles: { full_name: "Alice" }, projects: { name: "Proj 1" } }, // ignored
   ];
 
   it("sums hours × pay_rate per contractor with a per-project breakdown", () => {
-    const out = payrollByContractor(rows, rateByPair);
+    const out = payrollByContractor(rows, rateHistory);
     const alice = out.find((r) => r.user_id === "u1")!;
     // p1: 12.5h × $50 = $625.00; p2: 4h × $40 = $160.00 -> $785.00 total, 16.5h
     expect(alice.amount_cents).toBe(78500);
@@ -86,37 +95,58 @@ describe("payrollByContractor", () => {
   });
 
   it("flags hours logged with no pay rate instead of pricing them", () => {
-    const out = payrollByContractor(rows, rateByPair);
+    const out = payrollByContractor(rows, rateHistory);
     const bob = out.find((r) => r.user_id === "u2")!;
     expect(bob.amount_cents).toBe(0);
     expect(bob.hours).toBe(8);
     expect(bob.hasMissingRate).toBe(true);
     expect(bob.projects[0].pay_rate).toBeNull();
+    expect(bob.projects[0].missingRate).toBe(true);
   });
 
   it("sorts contractors by payout, highest first", () => {
-    const out = payrollByContractor(rows, rateByPair);
-    expect(out.map((r) => r.user_id)).toEqual(["u1", "u2"]);
+    expect(payrollByContractor(rows, rateHistory).map((r) => r.user_id)).toEqual(["u1", "u2"]);
   });
 
-  it("rounds once on the summed line, avoiding per-row float drift", () => {
-    const rate = new Map([["u3:p1", { pay_rate: 100 }]]);
-    const drifty = [
-      { user_id: "u3", project_id: "p1", hours: 0.1, profiles: { full_name: "C" }, projects: { name: "P" } },
-      { user_id: "u3", project_id: "p1", hours: 0.1, profiles: { full_name: "C" }, projects: { name: "P" } },
-      { user_id: "u3", project_id: "p1", hours: 0.1, profiles: { full_name: "C" }, projects: { name: "P" } },
-    ];
+  it("rounds once per (project, rate) group, avoiding per-row float drift", () => {
+    const hist = buildRateHistoryByPair(
+      [{ id: "a1", user_id: "u3", project_id: "p1" }],
+      [{ assignment_id: "a1", bill_rate: null, pay_rate: 100, effective_from: "1970-01-01" }]
+    );
+    const drifty = Array.from({ length: 3 }, () => ({
+      work_date: wd, user_id: "u3", project_id: "p1", hours: 0.1, profiles: { full_name: "C" }, projects: { name: "P" },
+    }));
     // 0.3h × $100 = $30.00 exactly, despite 0.1+0.1+0.1 !== 0.3 in binary float
-    expect(payrollByContractor(drifty, rate)[0].amount_cents).toBe(3000);
+    expect(payrollByContractor(drifty, hist)[0].amount_cents).toBe(3000);
+  });
+
+  it("prices each hour at its as-of rate and marks a project mixed when the rate changed", () => {
+    const hist = buildRateHistoryByPair(
+      [{ id: "a1", user_id: "u1", project_id: "p1" }],
+      [
+        { assignment_id: "a1", bill_rate: null, pay_rate: 50, effective_from: "2026-01-01" },
+        { assignment_id: "a1", bill_rate: null, pay_rate: 60, effective_from: "2026-07-01" }, // a raise
+      ]
+    );
+    const rows2 = [
+      { work_date: "2026-06-30", user_id: "u1", project_id: "p1", hours: 10, profiles: { full_name: "Al" }, projects: { name: "P" } }, // @50
+      { work_date: "2026-07-05", user_id: "u1", project_id: "p1", hours: 4, profiles: { full_name: "Al" }, projects: { name: "P" } }, // @60
+    ];
+    const line = payrollByContractor(rows2, hist)[0].projects[0];
+    expect(line.amount_cents).toBe(74000); // 10×$50 + 4×$60 = $740.00
+    expect(line.hours).toBe(14);
+    expect(line.mixedRate).toBe(true);
+    expect(line.pay_rate).toBeNull();
   });
 
   it("falls back to a dash name and returns [] for no rows", () => {
-    const out = payrollByContractor(
-      [{ user_id: "x", project_id: "p1", hours: 1 }],
-      new Map([["x:p1", { pay_rate: 10 }]])
+    const hist = buildRateHistoryByPair(
+      [{ id: "a1", user_id: "x", project_id: "p1" }],
+      [{ assignment_id: "a1", bill_rate: null, pay_rate: 10, effective_from: "1970-01-01" }]
     );
+    const out = payrollByContractor([{ work_date: wd, user_id: "x", project_id: "p1", hours: 1 }], hist);
     expect(out[0].name).toBe("—");
     expect(out[0].email).toBeNull();
-    expect(payrollByContractor([], rateByPair)).toEqual([]);
+    expect(payrollByContractor([], rateHistory)).toEqual([]);
   });
 });

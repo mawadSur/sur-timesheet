@@ -355,24 +355,41 @@ export async function setAssignmentRate(
   if (!assignment_id) return { ok: false, error: "Missing assignment." };
   const bill = parseRateField(formData.get("bill_rate"));
   const pay = parseRateField(formData.get("pay_rate"));
+  // A rate change takes effect TODAY; hours already worked keep the rate that was
+  // in effect when they happened (effective-dated history). Carry forward the
+  // currently-effective value for any field left blank, so setting just one rate
+  // doesn't null out the other from today onward.
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: current } = await supabase
+    .from("assignment_rates")
+    .select("bill_rate, pay_rate")
+    .eq("assignment_id", assignment_id)
+    .lte("effective_from", today)
+    .order("effective_from", { ascending: false })
+    .limit(1)
+    .maybeSingle();
   const payload: Record<string, unknown> = {
     assignment_id,
+    effective_from: today,
+    bill_rate: bill.present ? bill.value : current?.bill_rate == null ? null : Number(current.bill_rate),
+    pay_rate: pay.present ? pay.value : current?.pay_rate == null ? null : Number(current.pay_rate),
     updated_at: new Date().toISOString(),
   };
-  // Omit an invalid field so ON CONFLICT DO UPDATE leaves the prior value intact.
-  if (bill.present) payload.bill_rate = bill.value;
-  if (pay.present) payload.pay_rate = pay.value;
-  // Return the AUTHORITATIVE stored row so the UI can show exactly what's saved
-  // (reflecting rounding, ignored-invalid entries, and intentional clears).
+  // Upsert today's dated row (editing the rate again the same day replaces it;
+  // a change on a later day appends a new row and preserves history).
   const { data, error } = await supabase
     .from("assignment_rates")
-    .upsert(payload, { onConflict: "assignment_id" })
+    .upsert(payload, { onConflict: "assignment_id,effective_from" })
     .select("bill_rate, pay_rate")
     .single();
   if (error) return { ok: false, error: `Couldn't save rate: ${error.message}` };
   await logAudit("set_rate", {
     target: assignment_id,
-    metadata: { bill_rate: bill.present ? bill.value : undefined, pay_rate: pay.present ? pay.value : undefined },
+    metadata: {
+      effective_from: today,
+      bill_rate: bill.present ? bill.value : undefined,
+      pay_rate: pay.present ? pay.value : undefined,
+    },
   });
   revalidatePath("/admin");
   revalidatePath("/admin/books");

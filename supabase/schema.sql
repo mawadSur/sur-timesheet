@@ -289,10 +289,14 @@ create policy time_off_write_admin on public.time_off
 -- on `assignments`) so bill/pay rates NEVER appear on employee-readable
 -- assignment rows. Money lives only where is_admin() can reach it.
 create table if not exists public.assignment_rates (
-  assignment_id uuid primary key references public.assignments(id) on delete cascade,
+  assignment_id  uuid not null references public.assignments(id) on delete cascade,
+  effective_from date not null default current_date, -- rate applies to hours on/after this date
   bill_rate  numeric(10,2),   -- what the client pays per hour (revenue side)
   pay_rate   numeric(10,2),   -- what we pay the consultant per hour (cost side)
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- Effective-dated history: several rows per assignment; an hour prices at the
+  -- row with the latest effective_from on or before its work_date.
+  primary key (assignment_id, effective_from)
 );
 
 alter table public.assignment_rates enable row level security;

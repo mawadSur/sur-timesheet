@@ -13,7 +13,7 @@ import {
 } from "@/app/invoice-actions";
 import {
   usdCents,
-  buildRateByPair,
+  buildRateHistoryByPair,
   billableInvoiceLines,
   fetchAllRows,
 } from "@/lib/books";
@@ -63,16 +63,17 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
       fetchAllRows((from, to) =>
         supabase
           .from("timesheets")
-          .select("user_id, project_id, hours, profiles(full_name, email)")
+          .select("work_date, user_id, project_id, hours, profiles(full_name, email)")
           .eq("project_id", inv.project_id)
           .gte("work_date", inv.period_start)
           .lte("work_date", inv.period_end)
+          .order("id")
           .range(from, to)
       ),
       supabase.from("assignments").select("id, user_id, project_id").eq("project_id", inv.project_id),
-      supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate"),
+      supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate, effective_from"),
     ]);
-    const live = billableInvoiceLines(rows, buildRateByPair(assignments, rates));
+    const live = billableInvoiceLines(rows, buildRateHistoryByPair(assignments, rates));
     liveSubtotal = live.reduce((s, l) => s + l.amount_cents, 0);
     if (isDraft) {
       lines = live.map((l) => ({

@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { csvCell } from "@/lib/csv";
-import { buildRateByPair, fetchAllRows } from "@/lib/books";
+import { buildRateHistoryByPair, fetchAllRows } from "@/lib/books";
 import { resolvePayPeriod, payrollByContractor } from "@/lib/payroll";
 
 // CSV of a pay period's contractor payouts, one row per (contractor, project).
@@ -21,18 +21,18 @@ export async function GET(req: Request) {
     fetchAllRows((from, to) =>
       supabase
         .from("timesheets")
-        .select("user_id, project_id, hours, profiles(full_name, email), projects(name)")
+        .select("work_date, user_id, project_id, hours, profiles(full_name, email), projects(name)")
         .gte("work_date", period.start)
         .lte("work_date", period.end)
         .order("id")
         .range(from, to)
     ),
     supabase.from("assignments").select("id, user_id, project_id"),
-    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate"),
+    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate, effective_from"),
   ]);
 
-  const rateByPair = buildRateByPair(assignments, rates);
-  const rows = payrollByContractor(timesheets, rateByPair);
+  const rateHistory = buildRateHistoryByPair(assignments, rates);
+  const rows = payrollByContractor(timesheets, rateHistory);
 
   const header = ["Pay period", "Pay date", "Contractor", "Email", "Project", "Hours", "Pay rate (USD/hr)", "Amount (USD)"];
   const lines = [header.map(csvCell).join(",")];

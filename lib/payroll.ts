@@ -7,9 +7,11 @@
 // no pay_rate set can't be priced, so they're FLAGGED (hasMissingRate) and
 // counted in the hours total but not the dollar total — never silently dropped.
 //
-// Rounding: hours are summed per (contractor, project) first, then priced once
-// (round half-up on the line), and the contractor total is the sum of the line
-// cents. This keeps a single rounding step per line instead of per timesheet row.
+// Rounding: within a project, hours are grouped by the pay rate that applied and
+// priced once per (project, rate) group (round half-up); the project line and the
+// contractor total sum those group cents. One rounding step per distinct rate.
+
+import { rateAsOf, type RateRow } from "@/lib/books";
 
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -88,9 +90,10 @@ export type PayrollLine = {
   project_id: string;
   project_name: string;
   hours: number;
-  pay_rate: number | null;
+  pay_rate: number | null; // the single applicable rate, or null if mixed/missing
   amount_cents: number;
-  missingRate: boolean;
+  missingRate: boolean; // some hours had no applicable rate
+  mixedRate: boolean; // hours priced at more than one distinct rate this period
 };
 
 export type PayrollRow = {
@@ -103,29 +106,34 @@ export type PayrollRow = {
   projects: PayrollLine[];
 };
 
-type PayRate = { pay_rate: number | null; bill_rate?: number | null };
-
 // Aggregate timesheet rows for a period into one payout row per contractor, each
-// with a per-project breakdown. `rateByPair` is keyed "user_id:project_id" (see
-// buildRateByPair in lib/books.ts). Rows are expected to carry the joined
-// profiles(full_name, email) and projects(name).
+// with a per-project breakdown. `rateHistoryByPair` is keyed "user_id:project_id"
+// (see buildRateHistoryByPair in lib/books.ts); each hour is priced at the pay
+// rate in effect on its work_date. Rows carry the joined profiles(full_name,
+// email) and projects(name), plus work_date.
 export function payrollByContractor(
   rows: any[],
-  rateByPair: Map<string, PayRate>
+  rateHistoryByPair: Map<string, RateRow[]>
 ): PayrollRow[] {
+  type ProjAcc = {
+    project_id: string;
+    project_name: string;
+    // hours grouped by the applicable pay rate; key "" = no rate on file
+    byRate: Map<string, { pay_rate: number | null; hours: number }>;
+  };
   type Acc = {
     user_id: string;
     name: string;
     email: string | null;
     hours: number;
-    projects: Map<string, PayrollLine>;
+    projects: Map<string, ProjAcc>;
   };
   const byUser = new Map<string, Acc>();
 
   for (const t of rows ?? []) {
     const hrs = Number(t.hours) || 0;
     if (hrs <= 0) continue; // ignore zero/negative rows
-    const rate = rateByPair.get(`${t.user_id}:${t.project_id}`);
+    const rate = rateAsOf(rateHistoryByPair.get(`${t.user_id}:${t.project_id}`), String(t.work_date));
     const pay = rate?.pay_rate ?? null;
     const name = t.profiles?.full_name || t.profiles?.email || "—";
     const email = t.profiles?.email ?? null;
@@ -138,30 +146,47 @@ export function payrollByContractor(
     }
     u.hours += hrs;
 
-    let line = u.projects.get(t.project_id);
-    if (!line) {
-      line = {
-        project_id: t.project_id,
-        project_name: projectName,
-        hours: 0,
-        pay_rate: pay,
-        amount_cents: 0,
-        missingRate: pay == null,
-      };
-      u.projects.set(t.project_id, line);
+    let p = u.projects.get(t.project_id);
+    if (!p) {
+      p = { project_id: t.project_id, project_name: projectName, byRate: new Map() };
+      u.projects.set(t.project_id, p);
     }
-    line.hours += hrs;
+    const rateKey = pay == null ? "" : String(pay);
+    const g = p.byRate.get(rateKey) ?? { pay_rate: pay, hours: 0 };
+    g.hours += hrs;
+    p.byRate.set(rateKey, g);
   }
 
   const out: PayrollRow[] = [];
   for (const u of byUser.values()) {
-    const projects = [...u.projects.values()]
-      .map((l) => ({
-        ...l,
-        // Price the summed hours once (half-up), so per-row rounding can't drift.
-        amount_cents: l.pay_rate != null ? Math.round(l.hours * Number(l.pay_rate) * 100) : 0,
-      }))
-      .sort((a, b) => b.amount_cents - a.amount_cents || b.hours - a.hours);
+    const projects: PayrollLine[] = [];
+    for (const p of u.projects.values()) {
+      let hours = 0;
+      let amount_cents = 0;
+      let missingRate = false;
+      const ratesSeen: number[] = [];
+      for (const g of p.byRate.values()) {
+        hours += g.hours;
+        if (g.pay_rate == null) {
+          missingRate = true;
+          continue;
+        }
+        // Round once per (project, rate) group, so per-row float can't drift.
+        amount_cents += Math.round(g.hours * Number(g.pay_rate) * 100);
+        ratesSeen.push(Number(g.pay_rate));
+      }
+      const distinct = [...new Set(ratesSeen)];
+      projects.push({
+        project_id: p.project_id,
+        project_name: p.project_name,
+        hours,
+        pay_rate: distinct.length === 1 ? distinct[0] : null,
+        amount_cents,
+        missingRate,
+        mixedRate: distinct.length > 1,
+      });
+    }
+    projects.sort((a, b) => b.amount_cents - a.amount_cents || b.hours - a.hours);
     const amount_cents = projects.reduce((s, l) => s + l.amount_cents, 0);
     const hasMissingRate = projects.some((l) => l.missingRate);
     out.push({

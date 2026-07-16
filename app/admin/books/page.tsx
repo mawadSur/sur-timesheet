@@ -5,7 +5,8 @@ import { signOut } from "@/app/actions";
 import { generateInvoice } from "@/app/invoice-actions";
 import {
   resolveMonthWindow,
-  buildRateByPair,
+  buildRateHistoryByPair,
+  rateAsOf,
   lineMoneyCents,
   fetchAllRows,
   sumExpenseCents,
@@ -45,14 +46,14 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
     fetchAllRows((from, to) =>
       supabase
         .from("timesheets")
-        .select("user_id, project_id, hours, profiles(full_name, email), projects(name)")
+        .select("work_date, user_id, project_id, hours, profiles(full_name, email), projects(name)")
         .gte("work_date", start)
         .lte("work_date", end)
         .order("id")
         .range(from, to)
     ),
     supabase.from("assignments").select("id, user_id, project_id"),
-    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate"),
+    supabase.from("assignment_rates").select("assignment_id, bill_rate, pay_rate, effective_from"),
     // Expenses spent in this month (admin-only via RLS). Paged like timesheets so
     // a high-volume month can't be silently truncated by the PostgREST row cap.
     fetchAllRows((from, to) =>
@@ -66,7 +67,7 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
     ),
   ]);
 
-  const rateByPair = buildRateByPair(assignments, rates);
+  const rateHistory = buildRateHistoryByPair(assignments, rates);
 
   // ── Aggregate. Billable = both rates; overhead = pay only; missing = no pay ──
   let totalHours = 0;
@@ -80,7 +81,7 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
   for (const t of timesheets as any[]) {
     const hrs = Number(t.hours) || 0;
     const pairKey = `${t.user_id}:${t.project_id}`;
-    const { missingPay, revCents, billableCostCents, overheadCents } = lineMoneyCents(hrs, rateByPair.get(pairKey));
+    const { missingPay, revCents, billableCostCents, overheadCents } = lineMoneyCents(hrs, rateAsOf(rateHistory.get(pairKey), String(t.work_date)));
     const rev = revCents ?? 0;
     const bc = billableCostCents ?? 0;
     const oh = overheadCents ?? 0;

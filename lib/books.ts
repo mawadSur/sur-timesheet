@@ -36,19 +36,66 @@ export function resolveMonthWindow(monthParam: string | null | undefined): {
   return { month, start, end, y, m };
 }
 
-// Build the rate lookup keyed by "user_id:project_id" (an assignment is unique
-// per that pair, and its rates cascade with it).
-export function buildRateByPair(
+export type RateRow = Rate & { effective_from: string };
+
+// Build "user_id:project_id" -> rate HISTORY (rows sorted newest-first) from the
+// assignment list + the effective-dated assignment_rates rows. There may be
+// several dated rows per assignment; rateAsOf() picks the one that applies.
+export function buildRateHistoryByPair(
   assignments: any[] | null | undefined,
   rates: any[] | null | undefined
-): Map<string, Rate> {
-  const rateByAssignment = new Map((rates ?? []).map((r: any) => [r.assignment_id, r]));
-  const rateByPair = new Map<string, Rate>();
-  for (const a of (assignments ?? []) as any[]) {
-    const r = rateByAssignment.get(a.id);
-    if (r) rateByPair.set(`${a.user_id}:${a.project_id}`, r);
+): Map<string, RateRow[]> {
+  const histByAssignment = new Map<string, RateRow[]>();
+  for (const r of (rates ?? []) as any[]) {
+    const row: RateRow = {
+      bill_rate: r.bill_rate ?? null,
+      pay_rate: r.pay_rate ?? null,
+      effective_from: String(r.effective_from ?? "1970-01-01"),
+    };
+    const arr = histByAssignment.get(r.assignment_id) ?? [];
+    arr.push(row);
+    histByAssignment.set(r.assignment_id, arr);
   }
-  return rateByPair;
+  // Newest effective_from first so rateAsOf returns the first match.
+  for (const arr of histByAssignment.values()) {
+    arr.sort((a, b) => (a.effective_from < b.effective_from ? 1 : a.effective_from > b.effective_from ? -1 : 0));
+  }
+  const byPair = new Map<string, RateRow[]>();
+  for (const a of (assignments ?? []) as any[]) {
+    const arr = histByAssignment.get(a.id);
+    if (arr) byPair.set(`${a.user_id}:${a.project_id}`, arr);
+  }
+  return byPair;
+}
+
+// The rate in effect on `workDate` (YYYY-MM-DD): the newest history row whose
+// effective_from is on or before it. Undefined if no rate had taken effect yet.
+export function rateAsOf(history: RateRow[] | undefined, workDate: string): Rate | undefined {
+  if (!history) return undefined;
+  for (const r of history) {
+    if (r.effective_from <= workDate) return { bill_rate: r.bill_rate, pay_rate: r.pay_rate };
+  }
+  return undefined;
+}
+
+// Current rate per assignment_id (latest effective_from on or before `asOf`).
+// For admin displays that show "the rate right now", not per-hour pricing.
+export function latestRateByAssignment(
+  rates: any[] | null | undefined,
+  asOf: string
+): Map<string, Rate> {
+  const best = new Map<string, { eff: string; rate: Rate }>();
+  for (const r of (rates ?? []) as any[]) {
+    const eff = String(r.effective_from ?? "1970-01-01");
+    if (eff > asOf) continue;
+    const cur = best.get(r.assignment_id);
+    if (!cur || eff > cur.eff) {
+      best.set(r.assignment_id, { eff, rate: { bill_rate: r.bill_rate ?? null, pay_rate: r.pay_rate ?? null } });
+    }
+  }
+  const out = new Map<string, Rate>();
+  for (const [id, v] of best) out.set(id, v.rate);
+  return out;
 }
 
 export type LineMoney = {
@@ -95,32 +142,35 @@ export async function fetchAllRows(
   return all;
 }
 
-// Aggregate a project's BILLABLE hours for a period into one invoice line per
-// consultant (hours × bill_rate). Overhead (no bill rate) is never invoiced.
-// Returns snapshot-ready lines; totals are summed in integer cents.
+// Aggregate a project's BILLABLE hours for a period into invoice lines, one per
+// (consultant × bill_rate) so a mid-period rate change yields two legible lines
+// ("40h @ $100, 10h @ $120") instead of an amount that doesn't multiply out.
+// Each hour is priced at the bill rate in effect on its work_date. Overhead
+// (no bill rate) is never invoiced. Totals are summed in integer cents.
 export function billableInvoiceLines(
   rows: any[],
-  rateByPair: Map<string, Rate>
+  rateHistoryByPair: Map<string, RateRow[]>
 ): { user_id: string; name: string; hours: number; bill_rate: number; amount_cents: number }[] {
-  const byUser = new Map<
+  const byKey = new Map<
     string,
     { user_id: string; name: string; hours: number; bill_rate: number; amount_cents: number }
   >();
   for (const t of rows) {
     const hrs = Number(t.hours) || 0;
-    const rate = rateByPair.get(`${t.user_id}:${t.project_id}`);
+    const rate = rateAsOf(rateHistoryByPair.get(`${t.user_id}:${t.project_id}`), String(t.work_date));
     const bill = rate?.bill_rate ?? null;
     const pay = rate?.pay_rate ?? null;
     if (bill == null || pay == null) continue; // billable only (both rates present)
     const name = t.profiles?.full_name || t.profiles?.email || "—";
+    const key = `${t.user_id}:${Number(bill)}`; // split lines by distinct bill rate
     const line =
-      byUser.get(t.user_id) ??
+      byKey.get(key) ??
       { user_id: t.user_id, name, hours: 0, bill_rate: Number(bill), amount_cents: 0 };
     line.hours += hrs;
     line.amount_cents += Math.round(hrs * Number(bill) * 100);
-    byUser.set(t.user_id, line);
+    byKey.set(key, line);
   }
-  return [...byUser.values()].sort((a, b) => b.amount_cents - a.amount_cents);
+  return [...byKey.values()].sort((a, b) => b.amount_cents - a.amount_cents);
 }
 
 // Parse a user-entered dollar amount into non-negative integer cents (half-up).
