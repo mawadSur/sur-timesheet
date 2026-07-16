@@ -1,7 +1,4 @@
-import Link from "next/link";
-import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
-import { signOut } from "@/app/actions";
 
 export default async function AuditLog() {
   const supabase = await createClient();
@@ -15,31 +12,7 @@ export default async function AuditLog() {
   const entries = (rows ?? []) as any[];
 
   return (
-    <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="logo">{BRAND.name.charAt(0)}</div>
-          <div className="wordmark">
-            {BRAND.name}
-            <small>Audit log</small>
-          </div>
-          <nav className="topnav">
-            <Link className="navlink" href="/admin">
-              Admin
-            </Link>
-            <Link className="navlink" href="/">
-              Timesheet
-            </Link>
-            <form action={signOut}>
-              <button type="submit" className="navlink navbtn">
-                Log out
-              </button>
-            </form>
-          </nav>
-        </div>
-      </header>
-
-      <main className="page admin">
+    <main className="page admin">
         <section className="card">
           <h2 className="card-title">
             Audit log <span className="count-pill">last 200</span>
@@ -74,7 +47,6 @@ export default async function AuditLog() {
             </tbody>
           </table>
         </section>
-      </main>
-    </>
+    </main>
   );
 }

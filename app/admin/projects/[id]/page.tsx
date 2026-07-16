@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
-import { signOut } from "@/app/actions";
+import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   updateProject,
   addTimeOff,
@@ -46,33 +45,6 @@ const badgeBase: React.CSSProperties = {
   lineHeight: 1.6,
 };
 
-function Topbar() {
-  return (
-    <header className="topbar">
-      <div className="topbar-inner">
-        <div className="logo">{BRAND.name.charAt(0)}</div>
-        <div className="wordmark">
-          {BRAND.name}
-          <small>Project</small>
-        </div>
-        <nav className="topnav">
-          <Link className="navlink" href="/admin/dashboard">
-            Dashboard
-          </Link>
-          <Link className="navlink" href="/admin">
-            Admin
-          </Link>
-          <form action={signOut}>
-            <button type="submit" className="navlink navbtn">
-              Log out
-            </button>
-          </form>
-        </nav>
-      </div>
-    </header>
-  );
-}
-
 export default async function ProjectDetail({
   params,
 }: {
@@ -91,18 +63,16 @@ export default async function ProjectDetail({
 
   if (!project) {
     return (
-      <>
-        <Topbar />
-        <main className="page admin">
-          <section className="card">
-            <h2 className="card-title">Project not found</h2>
-            <p className="intro">This project doesn&apos;t exist or has been removed.</p>
-            <Link className="btn" href="/admin/dashboard">
-              Back to dashboard
-            </Link>
-          </section>
-        </main>
-      </>
+      <main className="page admin">
+        <Breadcrumbs items={[{ label: "Projects", href: "/admin/dashboard" }, { label: "Not found" }]} />
+        <section className="card">
+          <h2 className="card-title">Project not found</h2>
+          <p className="intro">This project doesn&apos;t exist or has been removed.</p>
+          <Link className="btn" href="/admin/dashboard">
+            Back to dashboard
+          </Link>
+        </section>
+      </main>
     );
   }
 
@@ -134,10 +104,11 @@ export default async function ProjectDetail({
   const expensesTotal = expenses.reduce((s, e) => s + (Number(e.amount_cents) || 0), 0);
 
   return (
-    <>
-      <Topbar />
-      <main className="page admin">
-        {/* ── Header ────────────────────────────────────────────────── */}
+    <main className="page admin">
+      <Breadcrumbs
+        items={[{ label: "Projects", href: "/admin/dashboard" }, { label: project.name }]}
+      />
+      {/* ── Header ────────────────────────────────────────────────── */}
         <section className="card">
           <h2 className="card-title">{project.name}</h2>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 4 }}>
@@ -584,7 +555,6 @@ export default async function ProjectDetail({
           <h2 className="card-title">Credentials</h2>
           <AdminCredentials projectId={id} projectName={project.name} />
         </section>
-      </main>
-    </>
+    </main>
   );
 }

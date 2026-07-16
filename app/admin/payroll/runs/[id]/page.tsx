@@ -1,8 +1,6 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { BRAND } from "@/config/timesheet";
+import Breadcrumbs from "@/components/Breadcrumbs";
 import { createClient } from "@/lib/supabase/server";
-import { signOut } from "@/app/actions";
 import {
   markPayrollRunPaid,
   regeneratePayrollRun,
@@ -78,21 +76,13 @@ export default async function PayrollRunDetail({ params }: { params: Promise<{ i
 
   return (
     <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="logo">{BRAND.name.charAt(0)}</div>
-          <div className="wordmark">{BRAND.name}<small>Payroll run</small></div>
-          <nav className="topnav">
-            <Link className="navlink" href="/admin/payroll/runs">Runs</Link>
-            <Link className="navlink" href="/admin/payroll">Payroll</Link>
-            <Link className="navlink" href="/admin/books">Books</Link>
-            <a className="navlink" href={`/admin/payroll/runs/${run.id}/export`}>Download CSV</a>
-            <form action={signOut}><button type="submit" className="navlink navbtn">Log out</button></form>
-          </nav>
-        </div>
-      </header>
-
       <main className="page admin">
+        <Breadcrumbs
+          items={[
+            { label: "Payroll runs", href: "/admin/payroll/runs" },
+            { label: periodLabel(run.period_start, run.period_end) },
+          ]}
+        />
         {/* ── Run header ───────────────────────────────────────────── */}
         <section className="card">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>

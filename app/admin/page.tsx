@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
 import {
   addAllowedEmail,
@@ -8,7 +7,6 @@ import {
   createProject,
   deleteProject,
   setProfileName,
-  signOut,
 } from "@/app/actions";
 import AdminCredentials from "@/components/AdminCredentials";
 import UserAccessControls from "@/components/UserAccessControls";
@@ -73,53 +71,6 @@ export default async function Admin() {
 
   return (
     <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="logo">{BRAND.name.charAt(0)}</div>
-          <div className="wordmark">
-            {BRAND.name}
-            <small>Admin</small>
-          </div>
-          <nav className="topnav">
-            <Link className="navlink" href="/admin/dashboard">
-              Dashboard
-            </Link>
-            <Link className="navlink" href="/admin/crm">
-              CRM
-            </Link>
-            <Link className="navlink" href="/admin/books">
-              Books
-            </Link>
-            <Link className="navlink" href="/admin/payroll">
-              Payroll
-            </Link>
-            <Link className="navlink" href="/admin/payroll/runs">
-              Payroll runs
-            </Link>
-            <Link className="navlink" href="/admin/invoices">
-              Invoices
-            </Link>
-            <Link className="navlink" href="/admin/rescuetime">
-              RescueTime
-            </Link>
-            <Link className="navlink" href="/">
-              Timesheet
-            </Link>
-            <Link className="navlink" href="/admin/audit">
-              Audit
-            </Link>
-            <a className="navlink" href="/admin/export">
-              Export CSV
-            </a>
-            <form action={signOut}>
-              <button type="submit" className="navlink navbtn">
-                Log out
-              </button>
-            </form>
-          </nav>
-        </div>
-      </header>
-
       <main className="page admin">
         {/* ── People & access ─────────────────────────────────────── */}
         <section className="card">

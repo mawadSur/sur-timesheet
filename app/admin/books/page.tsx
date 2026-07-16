@@ -1,7 +1,5 @@
 import Link from "next/link";
-import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
-import { signOut } from "@/app/actions";
 import { generateInvoice } from "@/app/invoice-actions";
 import {
   resolveMonthWindow,
@@ -120,22 +118,7 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
   const tileValue: React.CSSProperties = { fontSize: 24, fontWeight: 700, marginTop: 6 };
 
   return (
-    <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="logo">{BRAND.name.charAt(0)}</div>
-          <div className="wordmark">{BRAND.name}<small>Books</small></div>
-          <nav className="topnav">
-            <Link className="navlink" href="/admin">Admin</Link>
-            <Link className="navlink" href="/admin/payroll">Payroll</Link>
-            <Link className="navlink" href="/admin/invoices">Invoices</Link>
-            <a className="navlink" href={custom ? `/admin/books/export?from=${start}&to=${end}` : `/admin/books/export?month=${month}`}>Export CSV</a>
-            <form action={signOut}><button type="submit" className="navlink navbtn">Log out</button></form>
-          </nav>
-        </div>
-      </header>
-
-      <main className="page admin">
+    <main className="page admin">
         <section className="card">
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <h2 className="card-title" style={{ margin: 0 }}>Books &mdash; {custom ? `${start} → ${end}` : monthLabel(month)}</h2>
@@ -265,7 +248,6 @@ export default async function Books({ searchParams }: { searchParams: Promise<{ 
             </tbody>
           </table>
         </section>
-      </main>
-    </>
+    </main>
   );
 }

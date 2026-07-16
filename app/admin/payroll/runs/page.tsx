@@ -1,7 +1,5 @@
 import Link from "next/link";
-import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
-import { signOut } from "@/app/actions";
 import { usdCents } from "@/lib/books";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -43,20 +41,6 @@ export default async function PayrollRuns() {
 
   return (
     <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="logo">{BRAND.name.charAt(0)}</div>
-          <div className="wordmark">{BRAND.name}<small>Payroll runs</small></div>
-          <nav className="topnav">
-            <Link className="navlink" href="/admin">Admin</Link>
-            <Link className="navlink" href="/admin/payroll">Payroll</Link>
-            <Link className="navlink" href="/admin/books">Books</Link>
-            <Link className="navlink" href="/admin/invoices">Invoices</Link>
-            <form action={signOut}><button type="submit" className="navlink navbtn">Log out</button></form>
-          </nav>
-        </div>
-      </header>
-
       <main className="page admin">
         <section className="card">
           <h2 className="card-title">Payroll runs</h2>

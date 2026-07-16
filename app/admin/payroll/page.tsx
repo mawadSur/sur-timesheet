@@ -1,7 +1,5 @@
 import Link from "next/link";
-import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
-import { signOut } from "@/app/actions";
 import { createPayrollRun } from "@/app/payroll-actions";
 import { buildRateHistoryByPair, fetchAllRows, usdCents } from "@/lib/books";
 import { resolvePayPeriod, payrollByContractor } from "@/lib/payroll";
@@ -40,21 +38,6 @@ export default async function Payroll({ searchParams }: { searchParams: Promise<
 
   return (
     <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="logo">{BRAND.name.charAt(0)}</div>
-          <div className="wordmark">{BRAND.name}<small>Payroll</small></div>
-          <nav className="topnav">
-            <Link className="navlink" href="/admin">Admin</Link>
-            <Link className="navlink" href="/admin/payroll/runs">Runs</Link>
-            <Link className="navlink" href="/admin/books">Books</Link>
-            <Link className="navlink" href="/admin/invoices">Invoices</Link>
-            <a className="navlink" href={`/admin/payroll/export?period=${period.key}`}>Export CSV</a>
-            <form action={signOut}><button type="submit" className="navlink navbtn">Log out</button></form>
-          </nav>
-        </div>
-      </header>
-
       <main className="page admin">
         <section className="card">
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>

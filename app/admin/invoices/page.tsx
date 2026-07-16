@@ -1,7 +1,5 @@
 import Link from "next/link";
-import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
-import { signOut } from "@/app/actions";
 import { generateInvoice } from "@/app/invoice-actions";
 import { usdCents } from "@/lib/books";
 
@@ -63,23 +61,6 @@ export default async function Invoices() {
 
   return (
     <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="logo">{BRAND.name.charAt(0)}</div>
-          <div className="wordmark">
-            {BRAND.name}
-            <small>Invoices</small>
-          </div>
-          <nav className="topnav">
-            <Link className="navlink" href="/admin">Admin</Link>
-            <Link className="navlink" href="/admin/books">Books</Link>
-            <form action={signOut}>
-              <button type="submit" className="navlink navbtn">Log out</button>
-            </form>
-          </nav>
-        </div>
-      </header>
-
       <main className="page admin">
         {/* ── AR aging ─────────────────────────────────────────────── */}
         <section className="card">

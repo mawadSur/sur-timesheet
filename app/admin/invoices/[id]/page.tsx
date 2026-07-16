@@ -1,8 +1,6 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { BRAND } from "@/config/timesheet";
 import { createClient } from "@/lib/supabase/server";
-import { signOut } from "@/app/actions";
+import Breadcrumbs from "@/components/Breadcrumbs";
 import {
   sendInvoice,
   regenerateInvoice,
@@ -108,19 +106,13 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
   return (
     <>
       <style>{`@media print { .topbar, .no-print { display: none !important; } .page { padding-top: 20px; } }`}</style>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="logo">{BRAND.name.charAt(0)}</div>
-          <div className="wordmark">{BRAND.name}<small>Invoice</small></div>
-          <nav className="topnav">
-            <Link className="navlink" href="/admin/invoices">Invoices</Link>
-            <Link className="navlink" href="/admin/books">Books</Link>
-            <form action={signOut}><button type="submit" className="navlink navbtn">Log out</button></form>
-          </nav>
-        </div>
-      </header>
-
       <main className="page admin">
+        <Breadcrumbs
+          items={[
+            { label: "Invoices", href: "/admin/invoices" },
+            { label: inv.invoice_number ? `#${inv.invoice_number}` : "Draft invoice" },
+          ]}
+        />
         {drift && (
           <section className="card no-print" style={{ borderLeft: "4px solid #f79009" }}>
             <p className="intro" style={{ margin: 0 }}>
