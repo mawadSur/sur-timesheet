@@ -708,3 +708,35 @@ create policy timesheets_insert on public.timesheets
       )
     )
   );
+
+-- ============================================================================
+--  EDIT THE CURRENT WEEK UNTIL IT IS PAID
+--
+--  The weekly grid lets someone fix a mistake in the CURRENT week by replacing
+--  what they submitted (delete + re-insert); past weeks stay read-only. That
+--  editing window has to close once the hours have been paid, so this answers
+--  "is any of my time in this week already locked by a paid invoice or a paid
+--  payroll run?" in one round trip rather than one probe per (project, day).
+--
+--  Defined at end-of-file because it delegates to timesheet_is_locked(), which
+--  itself reads invoices / payroll_runs. security definer + an internal
+--  `user_id = auth.uid()` predicate keeps it scoped to the caller's own rows,
+--  so it can't be probed as an oracle over who has been paid. The real guard is
+--  still the RLS delete policy (timesheets_modify); this is the pre-check that
+--  lets the UI explain itself instead of failing a delete silently.
+-- ============================================================================
+create or replace function public.my_week_locked(week_start date)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.timesheets t
+    where t.user_id = auth.uid()
+      and t.work_date between week_start and week_start + 6
+      and public.timesheet_is_locked(t.user_id, t.project_id, t.work_date)
+  );
+$$;

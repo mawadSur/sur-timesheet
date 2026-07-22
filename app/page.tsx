@@ -47,7 +47,9 @@ export default async function Home() {
   // The week the grid opens on. getWeek is RLS-scoped to this user.
   const weekStart = currentWeekStart();
   const loaded = await getWeek(weekStart);
-  const week = loaded.ok ? loaded.data : { weekStart, submitted: false, entries: [] };
+  const week = loaded.ok
+    ? loaded.data
+    : { weekStart, submitted: false, locked: false, editable: true, entries: [] };
 
   return (
     <>

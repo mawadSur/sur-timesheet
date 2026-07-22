@@ -43,12 +43,18 @@ export default function WeeklyTimesheet({
   const [submitting, setSubmitting] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState("");
-  const [justSubmitted, setJustSubmitted] = useState(false);
+  const [justSubmitted, setJustSubmitted] = useState<null | "created" | "updated">(null);
+  // Correcting an already-submitted current week, rather than filling a fresh one.
+  const [editing, setEditing] = useState(false);
 
   const thisWeek = maxWeekStart;
   const days = useMemo(() => weekDays(week.weekStart), [week.weekStart]);
   const atCurrentWeek = week.weekStart >= thisWeek;
-  const readOnly = week.submitted;
+  // A submitted week is read-only unless the user has opened it for correction.
+  // Only the week in progress can be reopened, and only until it has been paid
+  // (`week.editable` folds both in — the server decides, and re-checks on save).
+  const readOnly = week.submitted && !editing;
+  const canEdit = week.submitted && week.editable;
 
   // Rows = every project available to log against, plus any project already
   // logged in this week that has since dropped off the list — otherwise those
@@ -82,6 +88,7 @@ export default function WeeklyTimesheet({
     setHours(nextHours);
     setNotes(nextNotes);
     setOpenNote(null);
+    setEditing(false); // switching weeks always lands back in view mode
   }, [week, days]);
 
   const cellValue = (projectId: string, i: number) => hours[projectId]?.[i] ?? "";
@@ -132,7 +139,7 @@ export default function WeeklyTimesheet({
 
   async function loadWeek(weekStart: string) {
     setError("");
-    setJustSubmitted(false);
+    setJustSubmitted(null);
     setLoading(true);
     const res = await getWeek(weekStart);
     setLoading(false);
@@ -165,12 +172,14 @@ export default function WeeklyTimesheet({
       return;
     }
     await loadWeek(week.weekStart); // re-read so the week renders as submitted
-    setJustSubmitted(true);
+    setJustSubmitted(res.replaced ? "updated" : "created");
   }
 
   function openConfirm() {
     setError("");
-    if (filled.length === 0) {
+    // An empty grid is only meaningful as a correction — clearing a week you
+    // submitted by mistake returns it to unsubmitted.
+    if (filled.length === 0 && !editing) {
       setError("Enter hours on at least one project before submitting.");
       return;
     }
@@ -232,14 +241,36 @@ export default function WeeklyTimesheet({
 
       {justSubmitted && (
         <div className="alert alert-ok">
-          Timesheet submitted for {weekRangeLabel(week.weekStart)}.
+          Timesheet {justSubmitted === "updated" ? "updated" : "submitted"} for{" "}
+          {weekRangeLabel(week.weekStart)}.
         </div>
       )}
       {error && <div className="alert alert-error">{error}</div>}
-      {readOnly && !justSubmitted && (
+
+      {readOnly && (
+        <div className="week-note">
+          {canEdit ? (
+            <>
+              <p className="intro">
+                Submitted. Spotted a mistake? You can still change this week
+                until it&apos;s paid.
+              </p>
+              <button type="button" className="btn btn-sm" onClick={() => setEditing(true)}>
+                Edit hours
+              </button>
+            </>
+          ) : (
+            <p className="intro">
+              {week.locked
+                ? "This week has been paid and can no longer be changed. Contact an admin if something looks wrong."
+                : "This week has closed and is read-only. Contact an admin if something needs to change."}
+            </p>
+          )}
+        </div>
+      )}
+      {editing && (
         <p className="intro week-note">
-          This week has been submitted and is read-only. Contact an admin if
-          something needs to change.
+          Editing this week. Submitting replaces what you logged earlier.
         </p>
       )}
 
@@ -318,9 +349,21 @@ export default function WeeklyTimesheet({
       </div>
 
       {!readOnly && (
-        <button className="submit" onClick={openConfirm} disabled={submitting || loading}>
-          {loading ? "Loading…" : "Submit timesheet"}
-        </button>
+        <div className="week-actions">
+          {editing && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => loadWeek(week.weekStart)}
+              disabled={submitting || loading}
+            >
+              Cancel
+            </button>
+          )}
+          <button className="submit" onClick={openConfirm} disabled={submitting || loading}>
+            {loading ? "Loading…" : editing ? "Update timesheet" : "Submit timesheet"}
+          </button>
+        </div>
       )}
 
       {confirming && (
@@ -329,6 +372,7 @@ export default function WeeklyTimesheet({
           filled={filled}
           daysLogged={daysLogged}
           total={grandTotal}
+          replacing={editing}
           submitting={submitting}
           onCancel={() => setConfirming(false)}
           onConfirm={confirmSubmit}
@@ -434,6 +478,7 @@ function ConfirmModal({
   filled,
   daysLogged,
   total,
+  replacing,
   submitting,
   onCancel,
   onConfirm,
@@ -442,6 +487,7 @@ function ConfirmModal({
   filled: { project: ProjectOption; total: number }[];
   daysLogged: number;
   total: number;
+  replacing: boolean;
   submitting: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -466,7 +512,9 @@ function ConfirmModal({
         aria-labelledby="confirm-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="confirm-title">Confirm your timesheet</h2>
+        <h2 id="confirm-title">
+          {replacing ? "Confirm your changes" : "Confirm your timesheet"}
+        </h2>
         <p className="modal-sub">{weekLabel}</p>
 
         <div className="summary">
@@ -484,26 +532,34 @@ function ConfirmModal({
           </div>
         </div>
 
-        <table className="tbl modal-tbl">
-          <thead>
-            <tr>
-              <th>Project</th>
-              <th className="right">Hours</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filled.map((r) => (
-              <tr key={r.project.id}>
-                <td>{r.project.name}</td>
-                <td className="right">{formatHours(r.total)}</td>
+        {filled.length > 0 ? (
+          <table className="tbl modal-tbl">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th className="right">Hours</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filled.map((r) => (
+                <tr key={r.project.id}>
+                  <td>{r.project.name}</td>
+                  <td className="right">{formatHours(r.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="modal-warn">
+            Every cell is empty — confirming clears this week entirely and
+            returns it to unsubmitted.
+          </p>
+        )}
 
         <p className="modal-warn">
-          Once submitted, this week becomes read-only. You won&apos;t be able to
-          change it yourself.
+          {replacing
+            ? "This replaces what you logged earlier for this week. You can keep changing it until the week is paid."
+            : "You can still correct this week until it's paid. After that it becomes read-only."}
         </p>
 
         <div className="modal-actions">
@@ -517,7 +573,11 @@ function ConfirmModal({
             onClick={onConfirm}
             disabled={submitting}
           >
-            {submitting ? "Submitting…" : "Confirm & submit"}
+            {submitting
+              ? "Saving…"
+              : replacing
+                ? "Confirm & update"
+                : "Confirm & submit"}
           </button>
         </div>
       </div>

@@ -904,6 +904,28 @@ select:disabled {
 }
 .week-note {
   margin: 14px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.week-note .intro {
+  margin: 0;
+}
+.week-note .btn {
+  flex: none;
+}
+.week-actions {
+  display: flex;
+  gap: 10px;
+}
+.week-actions .secondary {
+  margin: 0;
+  width: auto;
+  flex: none;
+}
+.week-actions .submit {
+  flex: 1;
 }
 .week-filter {
   margin-top: 14px;
