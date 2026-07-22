@@ -27,54 +27,9 @@ export async function signOut() {
   redirect("/login");
 }
 
-// ── Employee: submit a timesheet ────────────────────────────────────────────────
-type SubmitPayload = {
-  date: string;
-  entries: { projectId: string; hours: number; notes: string }[];
-};
-
-export async function submitTimesheet(payload: SubmitPayload) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Your session expired — please sign in again." };
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.date)) {
-    return { ok: false, error: "Invalid date." };
-  }
-
-  const rows = (payload.entries || [])
-    .map((e) => ({
-      user_id: user.id,
-      project_id: e.projectId,
-      work_date: payload.date,
-      hours: Number(e.hours),
-      notes: (e.notes || "").slice(0, 500),
-    }))
-    .filter(
-      (r) =>
-        r.project_id &&
-        Number.isFinite(r.hours) &&
-        r.hours > 0 &&
-        r.hours <= 24
-    );
-
-  if (rows.length === 0) {
-    return { ok: false, error: "Add at least one project with hours." };
-  }
-
-  const { error } = await supabase.from("timesheets").insert(rows);
-  if (error) {
-    return {
-      ok: false,
-      error:
-        "Could not save. You can only log hours for projects you're assigned to.",
-    };
-  }
-  revalidatePath("/");
-  return { ok: true, rows: rows.length };
-}
+// NOTE: hour logging moved to the weekly grid — see app/timesheet-actions.ts
+// (`getWeek` / `submitWeek`). The old per-day `submitTimesheet` was removed
+// with the form it backed.
 
 // ── Admin: allowed emails / roles ────────────────────────────────────────────────
 export async function addAllowedEmail(formData: FormData) {

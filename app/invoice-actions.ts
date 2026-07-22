@@ -52,11 +52,14 @@ export async function generateInvoice(formData: FormData) {
     .maybeSingle();
   if (existing?.id) redirect(`/admin/invoices/${existing.id}`);
 
-  const { data: project } = await supabase
-    .from("projects")
+  // Billing defaults live in the admin-only project_billing table (a project
+  // row is readable by staff, so it carries no money). The row is optional —
+  // a project that never set a bill-to simply has none.
+  const { data: billing } = await supabase
+    .from("project_billing")
     .select("bill_to")
-    .eq("id", project_id)
-    .single();
+    .eq("project_id", project_id)
+    .maybeSingle();
   const { subtotal_cents } = await computeBillable(supabase, project_id, start, end);
 
   const { data: inserted } = await supabase
@@ -68,7 +71,7 @@ export async function generateInvoice(formData: FormData) {
       status: "draft",
       subtotal_cents,
       total_cents: subtotal_cents,
-      bill_to: project?.bill_to ?? null,
+      bill_to: billing?.bill_to ?? null,
     })
     .select("id")
     .single();
@@ -113,15 +116,19 @@ export async function sendInvoice(formData: FormData) {
     .single();
   if (!inv || inv.status !== "draft") return;
 
-  const [{ lines, subtotal_cents }, { data: project }] = await Promise.all([
+  const [{ lines, subtotal_cents }, { data: billing }] = await Promise.all([
     computeBillable(supabase, inv.project_id, inv.period_start, inv.period_end),
-    supabase.from("projects").select("payment_terms_days, bill_to").eq("id", inv.project_id).single(),
+    supabase
+      .from("project_billing")
+      .select("payment_terms_days, bill_to")
+      .eq("project_id", inv.project_id)
+      .maybeSingle(),
   ]);
 
   const { data: number } = await supabase.rpc("next_invoice_number");
   const today = new Date();
   const due = new Date(today);
-  due.setDate(due.getDate() + Number(project?.payment_terms_days ?? 30));
+  due.setDate(due.getDate() + Number(billing?.payment_terms_days ?? 30));
 
   // Freeze the line snapshot.
   await supabase.from("invoice_lines").delete().eq("invoice_id", id); // idempotent re-send guard
@@ -147,7 +154,7 @@ export async function sendInvoice(formData: FormData) {
       due_on: iso(due),
       subtotal_cents,
       total_cents: subtotal_cents + Number(inv.adjustment_cents || 0),
-      bill_to: project?.bill_to ?? null,
+      bill_to: billing?.bill_to ?? null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);

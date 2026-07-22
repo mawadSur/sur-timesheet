@@ -307,9 +307,20 @@ drop policy if exists assignment_rates_admin on public.assignment_rates;
 create policy assignment_rates_admin on public.assignment_rates
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
--- Billing metadata on projects. Used by the invoice phases (M2); harmless now.
-alter table public.projects add column if not exists bill_to text;
-alter table public.projects add column if not exists payment_terms_days integer not null default 30;
+-- Per-project billing defaults (who we bill, net-N terms). Deliberately NOT
+-- columns on `projects`: staff can read every project row, so this lives in an
+-- admin-only table alongside the rest of the money layer. See PHASE 10.
+create table if not exists public.project_billing (
+  project_id         uuid primary key references public.projects(id) on delete cascade,
+  bill_to            text,
+  payment_terms_days integer not null default 30,
+  updated_at         timestamptz not null default now()
+);
+
+alter table public.project_billing enable row level security;
+drop policy if exists project_billing_admin on public.project_billing;
+create policy project_billing_admin on public.project_billing
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
 -- ============================================================================
 --  PHASE 5 — M2: client invoices + AR aging
@@ -655,3 +666,45 @@ as $$
   where prl.user_id = auth.uid() and pr.status = 'paid'
   order by pr.period_start desc, prl.amount_cents desc;
 $$;
+
+-- ============================================================================
+--  PHASE 10 — Staff: every project, no money
+--
+--  Staff are a restricted support type who float across the whole portfolio, so
+--  they read EVERY project and may log hours against any of it — while staying
+--  locked out of the credentials vault (Phase 6) and of every money table
+--  (assignment_rates / invoices / payroll_* / project_crm / expenses /
+--  project_billing are all is_admin()-only, and /admin is admin-gated in
+--  middleware). Their own pay stubs still work: my_pay_stubs() is scoped to the
+--  caller's own paid lines.
+--
+--  Redefined here (not above) because both policies reference is_staff(), which
+--  is created in the Phase 6 block. Same define-early / widen-later pattern as
+--  credentials_select. Idempotent.
+-- ============================================================================
+
+-- projects: admin sees all; staff see all; employees see their assigned ones.
+drop policy if exists projects_select on public.projects;
+create policy projects_select on public.projects
+  for select to authenticated using (
+    public.is_admin() or (
+      public.is_active_user() and (
+        public.is_staff() or exists (
+          select 1 from public.assignments a
+          where a.project_id = projects.id and a.user_id = auth.uid()
+        )
+      )
+    )
+  );
+
+-- timesheets: employees insert only for assigned projects; staff for any.
+drop policy if exists timesheets_insert on public.timesheets;
+create policy timesheets_insert on public.timesheets
+  for insert to authenticated with check (
+    user_id = auth.uid() and public.is_active_user() and (
+      public.is_staff() or exists (
+        select 1 from public.assignments a
+        where a.user_id = auth.uid() and a.project_id = timesheets.project_id
+      )
+    )
+  );
