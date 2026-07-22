@@ -21,10 +21,17 @@ const FILTER_THRESHOLD = 8;
 
 export default function WeeklyTimesheet({
   projects,
+  assignedIds,
   initialWeek,
   maxWeekStart,
 }: {
   projects: ProjectOption[];
+  /**
+   * Projects this person is actually assigned to — the target of "set all to
+   * 8h". For an employee that's every row; staff see the whole portfolio, so
+   * without this the bulk fill would book them onto projects they never worked.
+   */
+  assignedIds: string[];
   initialWeek: WeekData;
   /**
    * The current week as the SERVER sees it — the furthest week that may be
@@ -110,6 +117,37 @@ export default function WeeklyTimesheet({
     });
   }
 
+  /**
+   * Bulk fill: 8h across Mon–Fri on every assigned project currently in view.
+   * Respects the search filter so a staff member can narrow first. Falls back
+   * to the visible rows when the person has no assignments at all (a floating
+   * staff member), so the button is never a no-op.
+   */
+  const bulkTargets = useMemo(() => {
+    const assigned = new Set(assignedIds);
+    const inScope = assignedIds.length > 0
+      ? visibleRows.filter((p) => assigned.has(p.id))
+      : visibleRows;
+    return inScope.map((p) => p.id);
+  }, [assignedIds, visibleRows]);
+
+  function fillAllWeekdays() {
+    setHours((prev) => {
+      const next = { ...prev };
+      for (const id of bulkTargets) {
+        const row = next[id] ? [...next[id]] : emptyRow();
+        for (let i = 0; i < 5; i++) row[i] = "8";
+        next[id] = row;
+      }
+      return next;
+    });
+  }
+
+  /** Wipe every cell — the counterpart to the bulk fill, not just the visible ones. */
+  function clearAll() {
+    setHours({});
+  }
+
   const rowTotal = (projectId: string) =>
     sumHours((hours[projectId] ?? []).map((v) => normalizeHours(v)));
 
@@ -181,6 +219,17 @@ export default function WeeklyTimesheet({
     // submitted by mistake returns it to unsubmitted.
     if (filled.length === 0 && !editing) {
       setError("Enter hours on at least one project before submitting.");
+      return;
+    }
+    // Mirror the server's cap so a bulk fill across several projects is caught
+    // here rather than after a round trip.
+    const over = days.findIndex((_, i) => dayTotal(i) > 24);
+    if (over >= 0) {
+      setError(
+        `${days[over].name} ${days[over].dayOfMonth} adds up to ${formatHours(
+          dayTotal(over)
+        )} hours — a day can't exceed 24.`
+      );
       return;
     }
     setConfirming(true);
@@ -283,6 +332,26 @@ export default function WeeklyTimesheet({
             onChange={(e) => setFilter(e.target.value)}
             aria-label="Filter projects"
           />
+        </div>
+      )}
+
+      {!readOnly && (
+        <div className="section-head">
+          <h2>Hours</h2>
+          <div className="section-actions">
+            <button
+              type="button"
+              className="quick-fill"
+              onClick={fillAllWeekdays}
+              disabled={bulkTargets.length === 0}
+              title="8h on Mon–Fri for every project you're assigned to"
+            >
+              Set all to 8h
+            </button>
+            <button type="button" className="link-btn" onClick={clearAll}>
+              Clear
+            </button>
+          </div>
         </div>
       )}
 

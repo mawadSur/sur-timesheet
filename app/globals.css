@@ -939,6 +939,9 @@ select:disabled {
   font-size: 13.5px;
 }
 
+.section-head + .grid-scroll {
+  margin-top: 0;
+}
 .grid-scroll {
   margin-top: 16px;
   overflow-x: auto;

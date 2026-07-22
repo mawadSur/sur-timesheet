@@ -34,6 +34,15 @@ export default async function Home() {
     .select("id, name, starts_on, ends_on")
     .order("name");
 
+  // Which of those the person is actually assigned to. For an employee this is
+  // the whole list; for staff (who see everything) it's the subset they're on,
+  // which is what the "set all to 8h" bulk fill targets. RLS scopes this to
+  // the caller's own assignment rows.
+  const { data: assignments } = await supabase
+    .from("assignments")
+    .select("project_id")
+    .eq("user_id", user.id);
+
   const isAdmin = profile?.role === "admin";
   // Staff are a restricted support type: they see every project and can log
   // hours against any of them, but never the credentials vault (RLS enforces
@@ -43,6 +52,7 @@ export default async function Home() {
 
   const rows = (projects as ProjectRow[]) ?? [];
   const options: ProjectOption[] = rows.map((p) => ({ id: p.id, name: p.name }));
+  const assignedIds = (assignments ?? []).map((a) => String(a.project_id));
 
   // The week the grid opens on. getWeek is RLS-scoped to this user.
   const weekStart = currentWeekStart();
@@ -114,7 +124,12 @@ export default async function Home() {
           <CredentialsPanel key={p.id} projectId={p.id} projectName={p.name} />
         ))}
 
-        <WeeklyTimesheet projects={options} initialWeek={week} maxWeekStart={weekStart} />
+        <WeeklyTimesheet
+          projects={options}
+          assignedIds={assignedIds}
+          initialWeek={week}
+          maxWeekStart={weekStart}
+        />
 
         <p className="foot">
           {BRAND.name} Portal · {profile?.email}
